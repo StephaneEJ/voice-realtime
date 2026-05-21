@@ -11,6 +11,13 @@ from __future__ import annotations
 import asyncio
 import signal
 import sys
+import warnings
+
+# Suppress google-genai SDK chatty warnings about non-text/non-data parts —
+# these fire on every audio response when modality=AUDIO + output_audio_transcription
+# is enabled. Inoffensifs but pollute the transcript display.
+warnings.filterwarnings("ignore", message=".*non-text parts.*")
+warnings.filterwarnings("ignore", message=".*non-data parts.*")
 
 import typer
 from rich.console import Console
