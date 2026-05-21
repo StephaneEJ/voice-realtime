@@ -1,0 +1,44 @@
+# voice-realtime — config providers (template)
+# Copier en config/providers.yaml et remplir les clés.
+# config/providers.yaml est gitignored.
+
+providers:
+  openai:
+    enabled: true
+    model: gpt-realtime              # à confirmer nom exact OpenAI 2026
+    api_key: ${OPENAI_API_KEY}       # via env var
+    max_context_tokens: 32000
+    pricing:
+      mode: token
+      input_audio_per_1m_usd: 40.00  # à vérifier doc OpenAI à jour
+      output_audio_per_1m_usd: 80.00
+
+  gemini:
+    enabled: false                   # stub interface V1, live en V1.1
+    model: gemini-live-2.5           # à confirmer
+    api_key: ${GEMINI_API_KEY}
+    max_context_tokens: 64000
+    pricing:
+      mode: minute
+      per_minute_usd: 0.10           # à vérifier doc Google
+
+context_budgets:
+  low: 3000
+  medium: 8000
+  high: 20000
+
+limits:
+  default_max_duration_minutes: 15
+  warning_cost_usd: 1.00
+  hard_stop_cost_usd: 3.00
+  monthly_budget_usd: 50.00
+
+obsidian:
+  vault_path: ${OBSIDIAN_VAULT}      # auto-détecté si non défini
+  sessions_subfolder: "Voice Sessions"
+  default_project_path: "1 PROJETS"
+
+audio:
+  sample_rate: 24000
+  channels: 1
+  chunk_ms: 100
