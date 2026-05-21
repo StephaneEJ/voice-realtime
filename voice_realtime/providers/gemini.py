@@ -6,20 +6,18 @@ Audio I/O wiring lands in Milestone 2. This file proves the SDK + key + connect 
 from __future__ import annotations
 
 import asyncio
-import os
-import sys
 from typing import AsyncIterator
 
 from google import genai
 
+from ..log import get_logger
 from .base import ProviderConfig, RealtimeEvent, RealtimeVoiceProvider
 
-_DEBUG = os.environ.get("VOICE_REALTIME_DEBUG") == "1"
+logger = get_logger("voice_realtime.gemini")
 
 
 def _dbg(msg: str) -> None:
-    if _DEBUG:
-        print(f"[gemini debug] {msg}", file=sys.stderr, flush=True)
+    logger.debug(msg)
 
 DEFAULT_MODEL = "gemini-2.5-flash-native-audio-latest"
 # 2026-05-21 NOTE: native-audio models REQUIRE audio response modality (text-only rejected).

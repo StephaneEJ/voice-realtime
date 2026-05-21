@@ -7,15 +7,15 @@ Audio I/O wiring lands in Milestone 2.
 from __future__ import annotations
 
 import asyncio
-import os
 from typing import AsyncIterator
 
 import base64
 
 from openai import AsyncOpenAI
 
-_DEBUG = os.environ.get("VOICE_REALTIME_DEBUG") == "1"
+from ..log import get_logger
 
+logger = get_logger("voice_realtime.openai")
 OPENAI_AUDIO_SAMPLE_RATE = 24000
 
 from .base import ProviderConfig, RealtimeEvent
@@ -71,8 +71,7 @@ class OpenAIRealtimeProvider:
         try:
             async for event in self._conn:
                 etype = getattr(event, "type", "")
-                if _DEBUG:
-                    print(f"[debug openai event] {etype}", flush=True)
+                logger.debug(f"event: {etype}")
                 # Realtime-2 event names — output_text.* replace older text.*
                 if etype in ("response.text.delta", "response.output_text.delta"):
                     delta = getattr(event, "delta", "")

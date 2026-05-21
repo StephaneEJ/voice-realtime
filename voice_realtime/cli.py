@@ -26,6 +26,7 @@ from rich.panel import Panel
 from .config import SECRETS_PATH, load_config
 from .context_loader import build_context
 from .cost_tracker import CostTracker, monthly_total_usd
+from .log import setup_logging
 from .providers.base import ProviderConfig
 from .providers.gemini import DEFAULT_MODEL as GEMINI_DEFAULT_MODEL, GEMINI_INPUT_SAMPLE_RATE, GEMINI_OUTPUT_SAMPLE_RATE, GeminiProvider
 from .providers.openai_realtime import (
@@ -154,6 +155,7 @@ def talk(
     max_minutes: float = typer.Option(15.0, "--max-minutes", help="Hard duration cap (kill switch)."),
     cost_cap: float = typer.Option(3.0, "--cost-cap", help="Hard cost cap USD (kill switch)."),
     no_save: bool = typer.Option(False, "--no-save", help="Skip saving session note to vault."),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Also print debug logs to stderr (default: file only)."),
 ) -> None:
     """M2-M4: duplex audio session with context injection, cost tracking, vault save."""
     try:
@@ -190,6 +192,9 @@ def talk(
         system_prompt = base_prompt + "\n\n# Contexte vault (utilise si pertinent)\n\n" + ctx
     else:
         system_prompt = base_prompt
+
+    log_path = setup_logging(provider=provider, verbose=verbose)
+    console.print(f"[dim]Log file: {log_path}[/dim]")
 
     asyncio.run(
         _run_talk(
