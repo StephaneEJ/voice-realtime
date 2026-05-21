@@ -54,6 +54,8 @@ class OpenAIRealtimeProvider:
                 "input": {
                     "format": {"type": "audio/pcm", "rate": OPENAI_AUDIO_SAMPLE_RATE},
                     "turn_detection": {"type": "server_vad"},
+                    # Enable Whisper-based STT of user audio for terminal transcript
+                    "transcription": {"model": "whisper-1"},
                 },
                 "output": {
                     "format": {"type": "audio/pcm", "rate": OPENAI_AUDIO_SAMPLE_RATE},
