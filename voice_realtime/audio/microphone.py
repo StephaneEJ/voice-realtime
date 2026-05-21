@@ -57,9 +57,20 @@ class MicrophoneStream:
             return
         pcm16_bytes = indata.tobytes()
         try:
-            self._loop.call_soon_threadsafe(self._queue.put_nowait, pcm16_bytes)
-        except (asyncio.QueueFull, RuntimeError):
+            self._loop.call_soon_threadsafe(self._safe_put, pcm16_bytes)
+        except RuntimeError:
             pass
+
+    def _safe_put(self, data: bytes) -> None:
+        # Drop oldest chunk if queue is full — keep latest audio to minimize lag.
+        try:
+            self._queue.put_nowait(data)
+        except asyncio.QueueFull:
+            try:
+                self._queue.get_nowait()
+                self._queue.put_nowait(data)
+            except (asyncio.QueueEmpty, asyncio.QueueFull):
+                pass
 
     async def __aiter__(self) -> AsyncIterator[bytes]:
         while not self._closed:

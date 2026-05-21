@@ -63,18 +63,24 @@ class GeminiProvider:
         assert self._session is not None
         try:
             async for response in self._session.receive():
-                # Text mode: response.text
+                # 1. Audio bytes direct via response.data (Gemini Live convention for AUDIO modality)
+                audio_data = getattr(response, "data", None)
+                if audio_data:
+                    await self._events.put(
+                        RealtimeEvent(kind="audio_chunk_out", data={"pcm16": audio_data})
+                    )
+
+                # 2. Text accumulated from text parts (only if text mode or transcript)
                 text = getattr(response, "text", None)
                 if text:
                     await self._events.put(
                         RealtimeEvent(kind="partial_transcript_model", data={"text": text})
                     )
 
-                # Audio mode: response.server_content has model_turn (parts incl. inline_data audio)
-                # + output_transcription (text parallel)
+                # 3. server_content contains transcriptions + model_turn structured data
                 server_content = getattr(response, "server_content", None)
                 if server_content is not None:
-                    # Audio output chunks via model_turn.parts[*].inline_data
+                    # Fallback path: audio inside model_turn.parts[*].inline_data
                     model_turn = getattr(server_content, "model_turn", None)
                     if model_turn is not None:
                         parts = getattr(model_turn, "parts", None) or []
