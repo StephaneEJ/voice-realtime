@@ -116,11 +116,12 @@ class GeminiProvider:
         )
 
     async def receive_events(self) -> AsyncIterator[RealtimeEvent]:
+        # Generator continues until provider is closed by caller.
+        # session_closed events (turn_complete) are yielded but DO NOT end the iterator —
+        # turn_complete is per-turn, not session-end. Caller decides when to stop.
         while not self._closed:
             event = await self._events.get()
             yield event
-            if event.kind == "session_closed":
-                return
 
     async def close(self) -> None:
         if self._closed:

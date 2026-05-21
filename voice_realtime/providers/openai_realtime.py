@@ -134,11 +134,12 @@ class OpenAIRealtimeProvider:
         await self._conn.input_audio_buffer.append(audio=audio_b64)
 
     async def receive_events(self) -> AsyncIterator[RealtimeEvent]:
+        # Generator continues until provider is closed by caller.
+        # session_closed events (response.done) are yielded but DO NOT end the iterator —
+        # response.done is per-turn, not session-end. Caller decides when to stop.
         while not self._closed:
             event = await self._events.get()
             yield event
-            if event.kind == "session_closed":
-                return
 
     async def close(self) -> None:
         if self._closed:
