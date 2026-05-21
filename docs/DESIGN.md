@@ -1,82 +1,106 @@
 # DESIGN — voice-realtime
 
-**Status :** V0 — draft. À challenger.
-**Date :** 2026-05-21
-**Auteur :** Stéphane + Claude (Opus 4.7)
+**Status :** V0.1 — décisions tranchées 2026-05-21. Phase 1 prête à coder dès création compte OpenAI API.
+**Auteurs :** Stéphane + Claude (Opus 4.7)
+
+Liens cliquables vers Obsidian (clic ouvre la note dans Obsidian) :
+- Note projet vault : [Voice Realtime Skill](obsidian://open?vault=2ND_CERVEAU&file=1%20PROJETS%2FVoice%20Realtime%20Skill%2FVoice%20Realtime%20Skill)
+- Intention phase active : [1 Saut vers la Liberté — Intention](obsidian://open?vault=2ND_CERVEAU&file=2%20CASQUETTES%2FLife%20Phases%2F1%20Saut%20vers%20la%20Libert%C3%A9%2F1%20Intention)
+- Infrastructure : [Infrastructure](obsidian://open?vault=2ND_CERVEAU&file=_System%2FInfrastructure)
 
 ---
 
 ## 1. Goal (rappel)
 
-Permettre depuis une session OpenCode/Claude Code de basculer vers une conversation vocale duplex temps réel (WebSocket), tout en préservant et compactant intelligemment le contexte LLM actif. Multi-provider (OpenAI Realtime, Gemini Live, futur local).
+Skill `/voice-realtime` qui ouvre depuis OpenCode/Claude Code une session de conversation vocale duplex temps réel (WebSocket), avec contexte LLM actif compacté + budgétisé. Multi-provider — frontier reasoning models uniquement.
 
 ## 2. Non-goals
 
-- **NE remplace PAS** Jarvis voice (Edge TTS unidirectionnel). Coexistence.
-- **NE remplace PAS** Superwhisper (STT one-shot post-enregistrement). Coexistence.
+- **NE remplace PAS** Jarvis voice (Edge TTS unidirectionnel, gratuit). Coexistence.
+- **NE remplace PAS** Superwhisper (STT one-shot post-enregistrement). Coexistence — cf. [Superwhisper Pipeline v3-lite](obsidian://open?vault=2ND_CERVEAU&file=1%20PROJETS%2FSuperwhisper%20Pipeline%20v3-lite%2FSuperwhisper%20Pipeline%20v3-lite).
 - Pas de GUI obligatoire. Terminal first.
 - Pas de mobile app V1.
+- Pas d'orchestration managed (ElevenLabs/Vapi/Retell) — frontier reasoning seulement.
 
-## 3. Tensions identifiées
+## 3. État du marché (mai 2026) — frontier reasoning realtime voice
 
-### 3.1 Scope vs budget
+| Provider | Modèle | Sorti | Reasoning | Pricing | Statut |
+|----------|--------|-------|-----------|---------|--------|
+| OpenAI | gpt-realtime-2 | 2026-05-07 | GPT-5-class, niveaux minimal→very high | $32/$64 par 1M tokens audio in/out (~$5/h, ~$0.40 / 5 min) | **GA** |
+| Google | gemini-3.1-flash-live | 2026-03-26 | `thinkingLevel` minimal/low/medium/high, audio-natif (pas de pipeline STT/LLM/TTS) | $3/$12 par 1M tokens audio in/out (~$1.40/h, $0.023/min) | **GA** (Vertex + AI Studio) |
+| Anthropic | — | — | Claude Opus 4.7 = parité reasoning text mais **pas** de modalité voix realtime API | — | indispo |
 
-Choix utilisateur : multi-usage généraliste + budget <$50/mois + 2 providers V1.
+**Conclusion :** 2 frontier candidats actifs (OpenAI + Gemini). Anthropic indispo côté voix. ElevenLabs/Vapi = orchestrateurs sans modèle reasoning natif → exclus du périmètre frontier.
 
-Conflit : multi-usage exige abstraction propre. $50/mois = ~4h/mois = ~8 min/jour. À ce volume, l'abstraction multi-provider ne s'amortit jamais (utilisation < courbe d'apprentissage).
+## 4. Décisions tranchées 2026-05-21
 
-**Résolution proposée :**
+| # | Décision | Choix | Notes |
+|---|----------|-------|-------|
+| Langage | Python | SDK officiel `openai-agents` (PyPI) + `openai-node` côté Node aussi mature. Python = cohérence stack vault ([Superwhisper](obsidian://open?vault=2ND_CERVEAU&file=1%20PROJETS%2FSuperwhisper%20Pipeline%20v3-lite%2FSuperwhisper%20Pipeline%20v3-lite), Jarvis, scripts `_System/`). |
+| Cas d'usage pilote V1 | **Brainstorming projet actif** | Charger contexte projet, parler 15-30 min, sortir avec décisions + actions, save Obsidian. |
+| Auth OpenAI | Créer compte + $10 crédit | ChatGPT Plus = consumer, **pas** d'API access. Compte API séparé sur `platform.openai.com`. |
+| Provider V1 | **OpenAI + Gemini live, les deux** | Pas de stub. Comparaison qualité voix réelle sur usage Stéphane. Abstraction provider justifiée. |
 
-- Abstraction provider présente dès l'architecture (interface, pas magie).
-- V1 ne wire qu'**OpenAI Realtime** (plus mature, doc solide).
-- Gemini = **stub d'interface** vérifiant que l'abstraction tient. Wire live en V1.1 seulement si usage réel justifie.
-- Si après 2 semaines d'usage Phase 1 le compteur dit "1h/mois", on coupe Gemini définitivement et on simplifie.
+## 5. Tensions résiduelles
 
-**À challenger :** est-ce que Stéphane veut payer la "taxe abstraction" maintenant pour bénéfice peut-être jamais atteint ?
+### 5.1 Scope vs budget (mitigée mais pas éliminée)
 
-### 3.2 Cas d'usage généraliste = piège
+Budget $50/mois :
+- 100 % OpenAI → 10h/mois
+- 100 % Gemini → 35h/mois
+- Mix 50/50 → ~16h/mois
 
-Multi-usage en pratique = code qui ne sert spécifiquement à rien. Le MVP doit avoir **un** cas d'usage pilote testable, sinon on construit pour rien.
+Avec 2 providers live + cas d'usage généraliste brainstorming, abstraction provider justifiée par comparaison qualité réelle. **Mais** si après 2 semaines d'usage Stéphane n'utilise qu'un seul provider, on coupe l'autre.
 
-**Résolution proposée :** Phase 1 trancher 1 cas d'usage pilote parmi :
-- Brainstorming projet actif (charger contexte projet, sortir décisions/actions)
-- Mom Test debrief vocal (parler post-interview, extraire insights)
-- Coach addicto HALT (4 questions + plan physio avant cognitif)
+### 5.2 Risque d'abandon 3 mois
 
-**À challenger :** lequel ?
+Documenté dans [1 Intention](obsidian://open?vault=2ND_CERVEAU&file=2%20CASQUETTES%2FLife%20Phases%2F1%20Saut%20vers%20la%20Libert%C3%A9%2F1%20Intention). Mitigation : gate Phase 2 = 10 sessions réelles + 3 summary lues + budget respecté.
 
-### 3.3 Langage
+## 6. Architecture
 
-Python (cohérent avec Jarvis voice actuel, edge-tts, Superwhisper, scripts vault) vs TypeScript/Node (audio realtime côté Node SDK OpenAI plus mature, exemples officiels TS).
-
-**Résolution proposée :** **Python** par défaut (cohérence stack), avec validation que le SDK OpenAI Python supporte bien le streaming audio realtime (à vérifier).
-
-**À challenger :** vérification SDK Python audio streaming = blocker potentiel. Si galère, fallback Node.
-
-## 4. Architecture
-
-### 4.1 Interface provider
+### 6.1 Interface provider
 
 ```python
 # providers/base.py
-class RealtimeVoiceProvider(Protocol):
-    async def connect(self, config: ProviderConfig) -> None: ...
-    async def send_audio_chunk(self, chunk: bytes) -> None: ...
-    async def receive_events(self) -> AsyncIterator[RealtimeEvent]: ...
-    async def close(self) -> None: ...
+from typing import Protocol, AsyncIterator, Literal
+from dataclasses import dataclass
+
+@dataclass
+class ProviderConfig:
+    model: str
+    api_key: str
+    voice: str | None = None
+    thinking_level: Literal["minimal", "low", "medium", "high", "very_high"] | None = None
+    context_tokens: int = 3000  # CompactedContext budget
 
 @dataclass
 class RealtimeEvent:
-    kind: Literal["partial_transcript", "final_transcript", "audio_chunk", "error", "cost_update"]
+    kind: Literal[
+        "partial_transcript_user",
+        "final_transcript_user",
+        "partial_transcript_model",
+        "final_transcript_model",
+        "audio_chunk_out",
+        "tool_call",
+        "error",
+        "cost_update",
+        "session_closed",
+    ]
     data: dict
     timestamp_ms: int
+
+class RealtimeVoiceProvider(Protocol):
+    async def connect(self, config: ProviderConfig, context: str) -> None: ...
+    async def send_audio_chunk(self, pcm16: bytes) -> None: ...
+    async def receive_events(self) -> AsyncIterator[RealtimeEvent]: ...
+    async def close(self) -> None: ...
 ```
 
-### 4.2 Pipeline session
+### 6.2 Pipeline session
 
 ```
-1. /voice-realtime invoked
-2. context.detect_active()          → ContextPackage (projet, objectif, tâches)
+1. /voice-realtime [--provider openai|gemini] [--project <name>] [--budget medium]
+2. context.detect_active()           → ContextPackage (projet, objectif, tâches)
 3. summarization.compact(pkg, budget) → CompactedContext (≤3000 tokens V1)
 4. provider.connect(model, ctx)
 5. audio.start_microphone_stream()
@@ -85,48 +109,57 @@ class RealtimeEvent:
      transcript.render(event)
      cost_tracker.update(event)
      if cost_tracker.over_limit(): provider.close(); break
-7. summarization.generate_summary(transcript)
+7. summarization.generate_summary(transcript) via claude -p Sonnet
 8. obsidian.save_session_note(summary)
-9. memory.reinject(summary)
+9. memory.reinject(summary)  # MEMORY.md auto Claude Code
 ```
 
-### 4.3 Modules
+### 6.3 Modules
 
-| Module | Responsabilité | Phase |
+| Module | Responsabilité | Notes |
 |--------|----------------|-------|
-| `providers/openai.py` | OpenAI Realtime client | 1 |
-| `providers/gemini.py` | Stub interface V1, live V1.1 | 1 (stub) / 2 (live) |
-| `context/detector.py` | Détection projet actif (lecture daily/weekly note, env var, glob `_System/active-context.md`) | 1 |
-| `summarization/compacter.py` | Builder du CompactedContext | 1 |
-| `summarization/summary.py` | Génération summary post-session via `claude -p` | 1 |
-| `websocket/session.py` | Boucle async, audio streaming | 1 |
-| `cost-tracking/tracker.py` | Estimation live + kill switch | 1 |
-| `transcript/renderer.py` | Live terminal + save markdown | 1 |
-| `obsidian/save.py` | Écriture note `1 PROJETS/<X>/Voice Sessions/YYYY-MM-DD HH-MM.md` | 1 |
-| `commands/voice_realtime.py` | Entry point CLI | 1 |
-| `config/providers.yaml` | Pricing, max_context, voice profile | 1 |
+| `providers/openai.py` | OpenAI Realtime client | SDK `openai` `OpenAIRealtimeWebSocket` |
+| `providers/gemini.py` | Gemini Live client | SDK `google-genai` Live API |
+| `providers/base.py` | Protocol + ProviderConfig + RealtimeEvent | Abstraction commune |
+| `context/detector.py` | Détection projet actif | Lit daily note phase active + weekly + env `VR_PROJECT` |
+| `summarization/compacter.py` | Builder CompactedContext | Budget low|medium|high |
+| `summarization/summary.py` | Summary post-session | Via `claude -p` Sonnet — cf. [feedback_always_claude_cli_not_sdk](obsidian://open?vault=2ND_CERVEAU&file=_System%2FInfrastructure) |
+| `websocket/session.py` | Boucle async audio in/out | `sounddevice` pour mic capture |
+| `cost-tracking/tracker.py` | Estimation live + kill switch | jsonl local V1 |
+| `transcript/renderer.py` | Live terminal + save markdown | `rich` pour TUI |
+| `obsidian/save.py` | Save note `1 PROJETS/<X>/Voice Sessions/YYYY-MM-DD HH-MM.md` | Avec backlinks vers projet + tags |
+| `commands/voice_realtime.py` | Entry point CLI | `typer` argparse |
+| `config/providers.yaml` | Pricing, max_context, voice profile | Cf. `config/providers.example.yaml` |
 
-### 4.4 Config providers
+### 6.4 Config providers (V1)
 
 ```yaml
-# config/providers.yaml
 providers:
   openai:
     enabled: true
-    model: gpt-realtime  # à confirmer nom exact 2026
-    max_context_tokens: 32000
+    model: gpt-realtime-2          # GA 2026-05-07
+    api_key: ${OPENAI_API_KEY}
+    voice: alloy                    # à arbitrer après test
+    thinking_level: low             # défaut OpenAI, équilibre latence/raisonnement
+    max_context_tokens: 128000
     pricing:
       mode: token
-      input_audio_per_1m: 40.00  # USD, à vérifier doc OpenAI
-      output_audio_per_1m: 80.00
+      input_audio_per_1m_usd: 32.00
+      output_audio_per_1m_usd: 64.00
+      input_audio_cached_per_1m_usd: 0.40
 
   gemini:
-    enabled: false  # stub V1, live V1.1
-    model: gemini-live-2.5  # à confirmer
-    max_context_tokens: 64000
+    enabled: true
+    model: gemini-3.1-flash-live    # GA 2026-03-26 Vertex/AI Studio
+    api_key: ${GEMINI_API_KEY}
+    voice: Aoede                    # à arbitrer après test
+    thinking_level: low
+    max_context_tokens: 128000
+    audio_session_cap_minutes: 15   # limite native Gemini
     pricing:
-      mode: minute
-      per_minute: 0.10  # à vérifier doc Google
+      mode: token
+      input_audio_per_1m_usd: 3.00
+      output_audio_per_1m_usd: 12.00
 
 context_budgets:
   low: 3000
@@ -138,89 +171,110 @@ limits:
   warning_cost_usd: 1.00
   hard_stop_cost_usd: 3.00
   monthly_budget_usd: 50.00
+  monthly_warning_threshold_pct: 80
 ```
 
-### 4.5 Context detection (V1)
+### 6.5 Context detection (V1)
 
 Sources prioritaires :
-1. **Daily note du jour** (phase active) → intention + 3 priorités + reste à faire
-2. **Weekly note active** → priorités + tâches Deep Focus
-3. **Projet actif** : env var `VR_PROJECT` ou flag `--project <nom>`, sinon dernier projet modifié dans `1 PROJETS/`
-4. **Mémoire auto Claude** : `~/.claude/projects/.../memory/MEMORY.md` (index)
+1. Flag CLI `--project <nom>` → projet explicite
+2. Env var `VR_PROJECT` → projet exporté shell
+3. **Daily note du jour** (phase active) → intention + 3 priorités + reste à faire
+4. **Weekly note active** → priorités + tâches Deep Focus
+5. Mémoire auto Claude Code : `~/.claude/projects/.../memory/MEMORY.md` (index)
 
 Hors scope V1 : graphe Obsidian, recherche sémantique vault, conversations Claude Code passées.
 
-### 4.6 Cost tracking V1
+### 6.6 Cost tracking V1
 
-- Estimation **avant** session : durée prévue × tarif/min provider → warn si > $1
-- Live update toutes les 30 s
+- Pre-session : estimation `durée prévue × tarif/min provider` → warn si > $1
+- Live : update toutes les 30 s, affichage TUI
 - Kill switch hard à $3/session ou 15 min (configurable)
-- Persistance : `~/.voice-realtime/sessions.jsonl` (1 ligne par session) — pas NocoDB V1 (perf + simplicité)
+- Persistance : `~/.voice-realtime/sessions.jsonl` (1 ligne par session)
 - Compteur mensuel : sum jsonl du mois courant, alerte 80 % budget
+- V2 : migration NocoDB `ctt_voice_realtime_sessions` (cohérence infra cf. [Infrastructure](obsidian://open?vault=2ND_CERVEAU&file=_System%2FInfrastructure))
 
-## 5. Phases
+## 7. Phases
 
-### Phase 0 — Design doc (actuelle)
+### Phase 0 — Design doc (terminée)
 
-- [x] Repo bootstrap
+- [x] Repo bootstrap [`~/OBSIDIAN/PROJETS DEV/voice-realtime/`](file:///Users/stephanedufresne/OBSIDIAN/PROJETS%20DEV/voice-realtime/)
 - [x] README + DESIGN.md V0
 - [x] Stub skill `.claude/commands/voice-realtime.md`
-- [ ] Validation Stéphane : tensions, choix langage, cas d'usage pilote
+- [x] Décisions tranchées : langage, cas d'usage, auth, provider V1
+- [x] Modèles frontier vérifiés : OpenAI gpt-realtime-2 + Gemini 3.1 Flash Live
+- [x] Mémoire auto Claude Code indexée
 
 ### Phase 1 — MVP exécutable (~2-3 semaines effort)
 
-- [ ] Choix langage final (Python ou TS) après vérif SDK
-- [ ] Choix cas d'usage pilote
-- [ ] Provider abstraction + OpenAI Realtime live
-- [ ] Context compacter V0 (budget low : 3000 tokens, 1 source = daily/weekly note)
-- [ ] WebSocket session + audio in/out
-- [ ] Transcript live terminal + save markdown
-- [ ] Cost tracking + kill switch
-- [ ] Stub Gemini provider (interface only)
+**Pré-requis :** Stéphane crée compte sur `platform.openai.com` + alimente $10 + génère API key. Idem Gemini AI Studio (probablement gratuit pour démarrer).
+
+- [ ] `pyproject.toml` Python 3.12 + uv + ruff + mypy
+- [ ] `providers/base.py` Protocol + dataclasses
+- [ ] `providers/openai.py` client `OpenAIRealtimeWebSocket` minimal
+- [ ] `providers/gemini.py` client Gemini Live minimal
+- [ ] `audio/microphone.py` capture PCM16 24kHz mono via sounddevice
+- [ ] `audio/playback.py` lecture stream audio out
+- [ ] `context/detector.py` lecture daily/weekly + flag projet
+- [ ] `summarization/compacter.py` budget low (3000 tokens)
+- [ ] `websocket/session.py` boucle async event loop
+- [ ] `transcript/renderer.py` TUI live (rich)
+- [ ] `cost_tracking/tracker.py` live + kill switch
+- [ ] `obsidian/save.py` save markdown summary
+- [ ] `summarization/summary.py` via `claude -p` Sonnet
+- [ ] `commands/voice_realtime.py` entry point CLI
 - [ ] Tests usage réel 2 semaines, 10 sessions minimum
 
-**Gate de fin Phase 1 :** 10 sessions réellement utilisées + budget respecté + au moins 3 notes summary générées et lues post-session.
+**Gate de fin Phase 1 :** 10 sessions réellement utilisées + budget respecté + 3 notes summary lues post-session + Stéphane confirme valeur ressentie.
 
 ### Phase 2 — Si Phase 1 validée
 
-- Gemini Live wire
-- Summary auto enrichi + extraction décisions/actions structurées
+- Provider comparaison auto (run la même question sur les 2, log différence)
 - Rolling context window pour sessions > 15 min
-- Configurable budget mensuel + Telegram alert
+- Configurable budget mensuel + Telegram alert via [bot Jarvis](obsidian://open?vault=2ND_CERVEAU&file=_System%2FInfrastructure)
 - Latency metrics
+- Migration NocoDB sessions table
 
 ### Phase 3+ — Reportée
 
-- Multimodal (caméra/screen)
-- Local model fallback
+- Multimodal (caméra / screen) via Gemini multimodal Live
+- Local model fallback (Whisper local + LLM local)
 - Multi-agent concurrent voice
-- Telegram/Discord/mobile
+- Telegram / Discord / mobile
 
-## 6. Open questions
+## 8. Open questions résiduelles
 
-1. **Langage final** — Python (cohérence) ou TS (audio realtime maturity) ?
-2. **Cas d'usage pilote Phase 1** — brainstorming projet / Mom Test debrief / coach addicto HALT ?
-3. **Auth OpenAI** — compte API à créer (pas encore de clé Anthropic-style configurée pour OpenAI), budget à approvisionner.
-4. **Auth Gemini** — réutiliser OAuth `gws` existant ou nouvelle clé API ?
-5. **Microphone capture** — `sounddevice` Python ou pipeline OS-natif ? Réutilisation Superwhisper exclue (cf. note projet).
-6. **Persistance budget** — jsonl local (V1) puis NocoDB `ctt_voice_realtime_sessions` (V2) ?
-7. **Summary post-session** — via `claude -p` (cohérence règle vault) ou via le modèle realtime lui-même ?
-8. **Concurrence Superwhisper** — un `/voice-realtime` actif kill-il Superwhisper ? Ou les deux coexistent ?
+1. **Compte OpenAI API** — Stéphane crée + alimente $10 cette semaine.
+2. **Gemini auth** — réutiliser OAuth `gws` (déjà en place cf. [reference_gws_cli](obsidian://open?vault=2ND_CERVEAU&file=_System%2FInfrastructure)) ou nouvelle API key AI Studio ? AI Studio = simple, gws = nécessite scope Vertex AI ajouté.
+3. **Voice profile** — laquelle par provider ? À arbitrer après 1ère session test.
+4. **Concurrence Superwhisper** — un `/voice-realtime` actif kill-il Superwhisper ? Probablement oui pour éviter conflits mic.
+5. **Build in Public** — repo public GitHub ou privé ?
+6. **Skill multi-turn** — voice-realtime invoque-t-elle d'autres skills (`/inversion-check`, `/coach` après détection mot-clé) ? Hors scope V1.
 
-## 7. Risques
+## 9. Risques actualisés
 
 | Risque | Probabilité | Impact | Mitigation |
 |--------|-------------|--------|------------|
-| Abandon 3 mois (pattern documenté Intention) | Élevée | Élevé | Phase 1 minimale, gate de validation usage réel |
-| Coût explose si usage > prévu | Moyenne | Moyen | Kill switch hard $3/session, budget mensuel $50 |
-| SDK Python OpenAI Realtime immature | Moyenne | Élevé | Vérif blocking Phase 1, fallback TS si besoin |
-| Latence audio inacceptable en SSH/remote | Faible | Moyen | V1 = Mac local only, remote = Phase 2+ |
-| Confusion avec Jarvis voice / Superwhisper | Moyenne | Faible | Doc claire, README, note projet, naming explicite |
+| Abandon 3 mois | Élevée | Élevé | Gate Phase 2 = usage réel mesuré |
+| Coût explose | Faible (kill switch hard) | Moyen | Kill switch $3/session + budget mensuel $50 + alerte 80 % |
+| Latence audio remote SSH | Faible | Moyen | V1 = Mac local only |
+| Qualité voix décevante | Moyenne | Moyen | 2 providers V1 = comparaison réelle |
+| Gemini breaking change | Faible (GA depuis 26 mars) | Faible | Provider abstraction = swap rapide |
+| OpenAI quota / rate limit | Faible si $10 crédit | Moyen | Surveiller `429` + back-off |
 
-## 8. Décisions à acter
+## 10. Actions Stéphane (cette semaine)
 
-- [ ] Langage : Python | TS
-- [ ] Cas d'usage pilote Phase 1
-- [ ] Mode auth OpenAI (compte perso à créer + carte associée)
-- [ ] Soft launch (juste pour soi) ou Build in Public dès V1 ?
-- [ ] Repo public GitHub ou privé ?
+1. Aller sur `platform.openai.com`, créer compte (peut partager email avec ChatGPT Plus, billing séparé).
+2. Add payment method → top up $10 crédit pay-as-you-go.
+3. Settings → API Keys → générer `sk-...`, copier dans `~/.claude/voice-realtime.env` (chmod 600).
+4. Gemini : `aistudio.google.com` → générer API key gratuit ou via `gws` OAuth scope Vertex AI.
+5. Confirmer langage Python validé, Phase 1 démarre.
+
+## Sources frontier voice (vérif mai 2026)
+
+- OpenAI gpt-realtime-2 release 2026-05-07
+- Gemini 3.1 Flash Live release 2026-03-26 (GA Vertex + AI Studio)
+- Realtime API guide + SDK officiel `openai-agents` Python + `openai-node` TS
+- Gemini Live API Vertex AI
+
+Liens recherche stockés dans `docs/sources-2026-05-21.md` (à créer si besoin de re-vérifier ultérieurement).
