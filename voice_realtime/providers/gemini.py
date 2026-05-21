@@ -32,50 +32,97 @@ GEMINI_OUTPUT_SAMPLE_RATE = 24000  # outputs 24kHz
 
 
 class GeminiProvider:
-    """Minimal Gemini Live wrapper. Text-in/text-out for Milestone 1."""
+    """Gemini Live wrapper with transparent multi-turn reconnect.
+
+    The native-audio model closes session.receive() iterator after each model turn.
+    We re-open a session in a loop to keep the conversation alive.
+    """
 
     def __init__(self) -> None:
         self._client: genai.Client | None = None
-        self._session: object | None = None  # Live session context manager
-        self._session_cm: object | None = None
+        self._session = None  # type: ignore[assignment]  # current AsyncSession
+        self._session_cm = None
+        self._session_lock: asyncio.Lock = asyncio.Lock()
         self._events: asyncio.Queue[RealtimeEvent] = asyncio.Queue()
         self._receiver_task: asyncio.Task[None] | None = None
         self._closed: bool = False
+        # Persisted across reconnects
+        self._provider_config: ProviderConfig | None = None
+        self._system_prompt: str = ""
+        self._audio_mode: bool = False
+        self._model_id: str = ""
+        self._reconnect_count: int = 0
 
-    async def connect(self, config: ProviderConfig, system_prompt: str, audio: bool = False) -> None:
-        self._client = genai.Client(api_key=config.api_key)
-        model_id = config.model or DEFAULT_MODEL
-        is_native_audio = "native-audio" in model_id
-
+    def _build_live_config(self) -> dict:
+        is_native_audio = "native-audio" in self._model_id
         live_config: dict = {
-            "system_instruction": system_prompt,
-            # Allow long sessions: enable sliding-window context compression
-            # so the session can stay open across many turns without quota errors.
+            "system_instruction": self._system_prompt,
             "context_window_compression": {"sliding_window": {}},
-            # Enable session resumption (server returns handle, we can resume after disconnect).
             "session_resumption": {},
         }
-        if is_native_audio or audio:
-            # native-audio models REQUIRE audio response.
+        if is_native_audio or self._audio_mode:
             live_config["response_modalities"] = ["AUDIO"]
             live_config["speech_config"] = {
-                "voice_config": {"prebuilt_voice_config": {"voice_name": config.voice or "Aoede"}}
+                "voice_config": {"prebuilt_voice_config": {"voice_name": (self._provider_config.voice if self._provider_config else None) or "Aoede"}}
             }
             live_config["output_audio_transcription"] = {}
-            if audio:
-                # Also transcribe user input audio (for terminal display)
+            if self._audio_mode:
                 live_config["input_audio_transcription"] = {}
         else:
             live_config["response_modalities"] = ["TEXT"]
+        return live_config
 
-        self._session_cm = self._client.aio.live.connect(
-            model=model_id,
-            config=live_config,
-        )
-        self._session = await self._session_cm.__aenter__()
-        self._receiver_task = asyncio.create_task(self._receive_loop())
+    async def _open_session(self) -> None:
+        assert self._client is not None
+        async with self._session_lock:
+            self._session_cm = self._client.aio.live.connect(
+                model=self._model_id,
+                config=self._build_live_config(),
+            )
+            self._session = await self._session_cm.__aenter__()
+            _dbg(f"opened session #{self._reconnect_count + 1} model={self._model_id}")
 
-    async def _receive_loop(self) -> None:
+    async def _close_session(self) -> None:
+        async with self._session_lock:
+            if self._session_cm is not None:
+                try:
+                    await self._session_cm.__aexit__(None, None, None)
+                except Exception as exc:
+                    _dbg(f"session __aexit__ failed: {exc!r}")
+            self._session_cm = None
+            self._session = None
+
+    async def connect(self, config: ProviderConfig, system_prompt: str, audio: bool = False) -> None:
+        self._client = genai.Client(api_key=config.api_key)
+        self._provider_config = config
+        self._system_prompt = system_prompt
+        self._audio_mode = audio
+        self._model_id = config.model or DEFAULT_MODEL
+        await self._open_session()
+        self._receiver_task = asyncio.create_task(self._reconnect_loop())
+
+    async def _reconnect_loop(self) -> None:
+        """Outer loop: keep reading from session. When session ends, reconnect."""
+        total_chunks = 0
+        while not self._closed:
+            chunks_this_session = await self._receive_one_session()
+            total_chunks += chunks_this_session
+            if self._closed:
+                break
+            self._reconnect_count += 1
+            _dbg(f"session ended after {chunks_this_session} chunks, reconnecting (total reconnects={self._reconnect_count})")
+            await self._close_session()
+            try:
+                await self._open_session()
+            except Exception as exc:
+                _dbg(f"reconnect failed: {exc!r}")
+                await self._events.put(RealtimeEvent(kind="error", data={"exception": repr(exc)}))
+                return
+            await asyncio.sleep(0.05)  # brief breath between sessions
+        _dbg(f"reconnect_loop EXIT — total chunks: {total_chunks}, reconnects: {self._reconnect_count}")
+
+    async def _receive_one_session(self) -> int:
+        """Read events from current session until it closes. Returns chunk count."""
         assert self._session is not None
         chunk_count = 0
         try:
@@ -119,26 +166,33 @@ class GeminiProvider:
                     if getattr(server_content, "turn_complete", False):
                         await self._events.put(RealtimeEvent(kind="session_closed", data={"reason": "turn_complete"}))
         except Exception as exc:
-            _dbg(f"_receive_loop EXCEPTION after {chunk_count} chunks: {exc!r}")
-            await self._events.put(RealtimeEvent(kind="error", data={"exception": repr(exc)}))
-        _dbg(f"_receive_loop EXIT normally after {chunk_count} chunks")
+            _dbg(f"_receive_one_session EXCEPTION after {chunk_count} chunks: {exc!r}")
+            # Don't put error event — reconnect_loop will try to recover
+        return chunk_count
 
     async def send_text(self, text: str) -> None:
-        assert self._session is not None
-        await self._session.send_client_content(
+        async with self._session_lock:
+            session = self._session
+        if session is None:
+            raise RuntimeError("Gemini session not active")
+        await session.send_client_content(
             turns={"role": "user", "parts": [{"text": text}]},
             turn_complete=True,
         )
 
     async def send_audio_chunk(self, pcm16: bytes) -> None:
-        assert self._session is not None
+        # If we're mid-reconnect, session is None — drop chunk silently.
+        async with self._session_lock:
+            session = self._session
+        if session is None:
+            return
         try:
-            await self._session.send_realtime_input(
+            await session.send_realtime_input(
                 audio={"data": pcm16, "mime_type": f"audio/pcm;rate={GEMINI_INPUT_SAMPLE_RATE}"}
             )
         except Exception as exc:
-            _dbg(f"send_audio_chunk exception: {exc!r}")
-            raise
+            _dbg(f"send_audio_chunk exception (continuing, reconnect loop will recover): {exc!r}")
+            # Don't raise — let mic_pump continue. Reconnect loop will heal.
 
     async def receive_events(self) -> AsyncIterator[RealtimeEvent]:
         # Generator continues until provider is closed by caller.
@@ -154,11 +208,7 @@ class GeminiProvider:
         self._closed = True
         if self._receiver_task is not None:
             self._receiver_task.cancel()
-        if self._session_cm is not None:
-            try:
-                await self._session_cm.__aexit__(None, None, None)
-            except Exception:
-                pass
+        await self._close_session()
 
 
 _: RealtimeVoiceProvider = GeminiProvider()  # type: ignore[assignment]  # static check
