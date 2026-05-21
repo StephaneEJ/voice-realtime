@@ -6,11 +6,20 @@ Audio I/O wiring lands in Milestone 2. This file proves the SDK + key + connect 
 from __future__ import annotations
 
 import asyncio
+import os
+import sys
 from typing import AsyncIterator
 
 from google import genai
 
 from .base import ProviderConfig, RealtimeEvent, RealtimeVoiceProvider
+
+_DEBUG = os.environ.get("VOICE_REALTIME_DEBUG") == "1"
+
+
+def _dbg(msg: str) -> None:
+    if _DEBUG:
+        print(f"[gemini debug] {msg}", file=sys.stderr, flush=True)
 
 DEFAULT_MODEL = "gemini-2.5-flash-native-audio-latest"
 # 2026-05-21 NOTE: native-audio models REQUIRE audio response modality (text-only rejected).
@@ -61,11 +70,14 @@ class GeminiProvider:
 
     async def _receive_loop(self) -> None:
         assert self._session is not None
+        chunk_count = 0
         try:
             async for response in self._session.receive():
                 # 1. Audio bytes direct via response.data (Gemini Live convention for AUDIO modality)
                 audio_data = getattr(response, "data", None)
                 if audio_data:
+                    chunk_count += 1
+                    _dbg(f"audio chunk #{chunk_count} size={len(audio_data)}B")
                     await self._events.put(
                         RealtimeEvent(kind="audio_chunk_out", data={"pcm16": audio_data})
                     )
@@ -100,7 +112,9 @@ class GeminiProvider:
                     if getattr(server_content, "turn_complete", False):
                         await self._events.put(RealtimeEvent(kind="session_closed", data={"reason": "turn_complete"}))
         except Exception as exc:
+            _dbg(f"_receive_loop EXCEPTION after {chunk_count} chunks: {exc!r}")
             await self._events.put(RealtimeEvent(kind="error", data={"exception": repr(exc)}))
+        _dbg(f"_receive_loop EXIT normally after {chunk_count} chunks")
 
     async def send_text(self, text: str) -> None:
         assert self._session is not None
@@ -111,9 +125,13 @@ class GeminiProvider:
 
     async def send_audio_chunk(self, pcm16: bytes) -> None:
         assert self._session is not None
-        await self._session.send_realtime_input(
-            audio={"data": pcm16, "mime_type": f"audio/pcm;rate={GEMINI_INPUT_SAMPLE_RATE}"}
-        )
+        try:
+            await self._session.send_realtime_input(
+                audio={"data": pcm16, "mime_type": f"audio/pcm;rate={GEMINI_INPUT_SAMPLE_RATE}"}
+            )
+        except Exception as exc:
+            _dbg(f"send_audio_chunk exception: {exc!r}")
+            raise
 
     async def receive_events(self) -> AsyncIterator[RealtimeEvent]:
         # Generator continues until provider is closed by caller.
