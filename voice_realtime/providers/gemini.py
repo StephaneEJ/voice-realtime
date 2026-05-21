@@ -77,21 +77,10 @@ class GeminiProvider:
                         RealtimeEvent(kind="partial_transcript_model", data={"text": text})
                     )
 
-                # 3. server_content contains transcriptions + model_turn structured data
+                # 3. server_content contains transcriptions + model_turn structured data.
+                # Skip model_turn.parts[*].inline_data — it duplicates response.data (already emitted above).
                 server_content = getattr(response, "server_content", None)
                 if server_content is not None:
-                    # Fallback path: audio inside model_turn.parts[*].inline_data
-                    model_turn = getattr(server_content, "model_turn", None)
-                    if model_turn is not None:
-                        parts = getattr(model_turn, "parts", None) or []
-                        for part in parts:
-                            inline = getattr(part, "inline_data", None)
-                            if inline is not None:
-                                pcm16 = getattr(inline, "data", None)
-                                if pcm16:
-                                    await self._events.put(
-                                        RealtimeEvent(kind="audio_chunk_out", data={"pcm16": pcm16})
-                                    )
                     # Text transcript parallel to audio (output_audio_transcription)
                     out_transcript = getattr(server_content, "output_transcription", None)
                     if out_transcript is not None:
