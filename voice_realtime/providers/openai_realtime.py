@@ -10,9 +10,13 @@ import asyncio
 import os
 from typing import AsyncIterator
 
+import base64
+
 from openai import AsyncOpenAI
 
 _DEBUG = os.environ.get("VOICE_REALTIME_DEBUG") == "1"
+
+OPENAI_AUDIO_SAMPLE_RATE = 24000
 
 from .base import ProviderConfig, RealtimeEvent
 
@@ -22,7 +26,7 @@ DEFAULT_MODEL = "gpt-realtime-2"
 
 
 class OpenAIRealtimeProvider:
-    """Minimal OpenAI Realtime wrapper. Text-in/text-out for Milestone 1."""
+    """OpenAI Realtime wrapper. Supports text-only OR audio I/O depending on `audio` arg."""
 
     def __init__(self) -> None:
         self._client: AsyncOpenAI | None = None
@@ -31,21 +35,32 @@ class OpenAIRealtimeProvider:
         self._events: asyncio.Queue[RealtimeEvent] = asyncio.Queue()
         self._receiver_task: asyncio.Task[None] | None = None
         self._closed: bool = False
+        self._audio_mode: bool = False
 
-    async def connect(self, config: ProviderConfig, system_prompt: str) -> None:
+    async def connect(self, config: ProviderConfig, system_prompt: str, audio: bool = False) -> None:
         self._client = AsyncOpenAI(api_key=config.api_key)
         self._conn_cm = self._client.realtime.connect(model=config.model or DEFAULT_MODEL)
         self._conn = await self._conn_cm.__aenter__()
+        self._audio_mode = audio
 
-        # Configure session — text-only output, system instructions.
         # Realtime-2 API: `output_modalities` replaces older `modalities`.
-        await self._conn.session.update(
-            session={
-                "type": "realtime",
-                "output_modalities": ["text"],
-                "instructions": system_prompt,
+        session_payload: dict = {
+            "type": "realtime",
+            "output_modalities": ["audio"] if audio else ["text"],
+            "instructions": system_prompt,
+        }
+        if audio:
+            session_payload["audio"] = {
+                "input": {
+                    "format": {"type": "audio/pcm", "rate": OPENAI_AUDIO_SAMPLE_RATE},
+                    "turn_detection": {"type": "server_vad"},
+                },
+                "output": {
+                    "format": {"type": "audio/pcm", "rate": OPENAI_AUDIO_SAMPLE_RATE},
+                    "voice": config.voice or "alloy",
+                },
             }
-        )
+        await self._conn.session.update(session=session_payload)
 
         self._receiver_task = asyncio.create_task(self._receive_loop())
 
@@ -67,6 +82,33 @@ class OpenAIRealtimeProvider:
                     await self._events.put(
                         RealtimeEvent(kind="final_transcript_model", data={"text": text})
                     )
+                elif etype == "response.output_audio.delta":
+                    # base64-encoded PCM16 chunk
+                    delta_b64 = getattr(event, "delta", "")
+                    if delta_b64:
+                        pcm16 = base64.b64decode(delta_b64)
+                        await self._events.put(
+                            RealtimeEvent(kind="audio_chunk_out", data={"pcm16": pcm16})
+                        )
+                elif etype == "response.output_audio_transcript.delta":
+                    # Transcript of audio output (parallel to audio chunks)
+                    delta = getattr(event, "delta", "")
+                    if delta:
+                        await self._events.put(
+                            RealtimeEvent(kind="partial_transcript_model", data={"text": delta})
+                        )
+                elif etype == "conversation.item.input_audio_transcription.delta":
+                    delta = getattr(event, "delta", "")
+                    if delta:
+                        await self._events.put(
+                            RealtimeEvent(kind="partial_transcript_user", data={"text": delta})
+                        )
+                elif etype == "conversation.item.input_audio_transcription.completed":
+                    transcript = getattr(event, "transcript", "")
+                    if transcript:
+                        await self._events.put(
+                            RealtimeEvent(kind="final_transcript_user", data={"text": transcript})
+                        )
                 elif etype == "response.done":
                     await self._events.put(RealtimeEvent(kind="session_closed", data={"reason": "response_done"}))
                 elif etype == "error":
@@ -87,7 +129,9 @@ class OpenAIRealtimeProvider:
         await self._conn.response.create()
 
     async def send_audio_chunk(self, pcm16: bytes) -> None:
-        raise NotImplementedError("Audio I/O lands in Milestone 2")
+        assert self._conn is not None
+        audio_b64 = base64.b64encode(pcm16).decode("ascii")
+        await self._conn.input_audio_buffer.append(audio=audio_b64)
 
     async def receive_events(self) -> AsyncIterator[RealtimeEvent]:
         while not self._closed:

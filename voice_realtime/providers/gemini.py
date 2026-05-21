@@ -18,6 +18,9 @@ DEFAULT_MODEL = "gemini-2.5-flash-native-audio-latest"
 # Workaround: use native-audio model with AUDIO modality + output_audio_transcription
 # to get text transcript of audio response for terminal print.
 
+GEMINI_INPUT_SAMPLE_RATE = 16000   # Gemini Live expects 16kHz input
+GEMINI_OUTPUT_SAMPLE_RATE = 24000  # outputs 24kHz
+
 
 class GeminiProvider:
     """Minimal Gemini Live wrapper. Text-in/text-out for Milestone 1."""
@@ -30,19 +33,22 @@ class GeminiProvider:
         self._receiver_task: asyncio.Task[None] | None = None
         self._closed: bool = False
 
-    async def connect(self, config: ProviderConfig, system_prompt: str) -> None:
+    async def connect(self, config: ProviderConfig, system_prompt: str, audio: bool = False) -> None:
         self._client = genai.Client(api_key=config.api_key)
         model_id = config.model or DEFAULT_MODEL
         is_native_audio = "native-audio" in model_id
 
         live_config: dict = {"system_instruction": system_prompt}
-        if is_native_audio:
-            # native-audio models REQUIRE audio response. Use audio + transcription for terminal.
+        if is_native_audio or audio:
+            # native-audio models REQUIRE audio response.
             live_config["response_modalities"] = ["AUDIO"]
             live_config["speech_config"] = {
                 "voice_config": {"prebuilt_voice_config": {"voice_name": config.voice or "Aoede"}}
             }
             live_config["output_audio_transcription"] = {}
+            if audio:
+                # Also transcribe user input audio (for terminal display)
+                live_config["input_audio_transcription"] = {}
         else:
             live_config["response_modalities"] = ["TEXT"]
 
@@ -64,15 +70,37 @@ class GeminiProvider:
                         RealtimeEvent(kind="partial_transcript_model", data={"text": text})
                     )
 
-                # Audio mode: response.server_content.output_transcription.text
+                # Audio mode: response.server_content has model_turn (parts incl. inline_data audio)
+                # + output_transcription (text parallel)
                 server_content = getattr(response, "server_content", None)
                 if server_content is not None:
+                    # Audio output chunks via model_turn.parts[*].inline_data
+                    model_turn = getattr(server_content, "model_turn", None)
+                    if model_turn is not None:
+                        parts = getattr(model_turn, "parts", None) or []
+                        for part in parts:
+                            inline = getattr(part, "inline_data", None)
+                            if inline is not None:
+                                pcm16 = getattr(inline, "data", None)
+                                if pcm16:
+                                    await self._events.put(
+                                        RealtimeEvent(kind="audio_chunk_out", data={"pcm16": pcm16})
+                                    )
+                    # Text transcript parallel to audio (output_audio_transcription)
                     out_transcript = getattr(server_content, "output_transcription", None)
                     if out_transcript is not None:
                         transcript_text = getattr(out_transcript, "text", None)
                         if transcript_text:
                             await self._events.put(
                                 RealtimeEvent(kind="partial_transcript_model", data={"text": transcript_text})
+                            )
+                    # User input transcription (when input_audio_transcription enabled)
+                    in_transcript = getattr(server_content, "input_transcription", None)
+                    if in_transcript is not None:
+                        in_text = getattr(in_transcript, "text", None)
+                        if in_text:
+                            await self._events.put(
+                                RealtimeEvent(kind="partial_transcript_user", data={"text": in_text})
                             )
                     if getattr(server_content, "turn_complete", False):
                         await self._events.put(RealtimeEvent(kind="session_closed", data={"reason": "turn_complete"}))
@@ -87,7 +115,10 @@ class GeminiProvider:
         )
 
     async def send_audio_chunk(self, pcm16: bytes) -> None:
-        raise NotImplementedError("Audio I/O lands in Milestone 2")
+        assert self._session is not None
+        await self._session.send_realtime_input(
+            audio={"data": pcm16, "mime_type": f"audio/pcm;rate={GEMINI_INPUT_SAMPLE_RATE}"}
+        )
 
     async def receive_events(self) -> AsyncIterator[RealtimeEvent]:
         while not self._closed:

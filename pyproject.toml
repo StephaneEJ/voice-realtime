@@ -5,9 +5,11 @@ description = "Duplex realtime voice skill for Claude Code / OpenCode. Multi-pro
 requires-python = ">=3.12"
 dependencies = [
     "google-genai>=2.5.0",
+    "numpy>=2.4.6",
     "openai>=2.37.0",
     "python-dotenv>=1.2.2",
     "rich>=15.0.0",
+    "sounddevice>=0.5.5",
     "typer>=0.25.1",
 ]
 
