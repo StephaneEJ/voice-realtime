@@ -102,29 +102,50 @@ class GeminiProvider:
         self._receiver_task = asyncio.create_task(self._reconnect_loop())
 
     async def _reconnect_loop(self) -> None:
-        """Outer loop: keep reading from session. When session ends, reconnect."""
+        """Outer loop: re-iterate session.receive() on premature turn_complete.
+        Only reconnect when the WebSocket is actually dead (ConnectionClosed).
+
+        Workaround for bug googleapis/python-genai#2117 — native-audio model
+        sends turnComplete prematurely after 1-3 sentences (often mid-word),
+        and the async for iterator exits even though WebSocket is still alive.
+        """
         total_chunks = 0
+        turns_reentered = 0
         while not self._closed:
-            chunks_this_session = await self._receive_one_session()
+            chunks_this_session, conn_dead = await self._receive_one_session()
             total_chunks += chunks_this_session
             if self._closed:
                 break
-            self._reconnect_count += 1
-            _dbg(f"session ended after {chunks_this_session} chunks, reconnecting (total reconnects={self._reconnect_count})")
-            await self._close_session()
-            try:
-                await self._open_session()
-            except Exception as exc:
-                _dbg(f"reconnect failed: {exc!r}")
-                await self._events.put(RealtimeEvent(kind="error", data={"exception": repr(exc)}))
-                return
-            await asyncio.sleep(0.05)  # brief breath between sessions
-        _dbg(f"reconnect_loop EXIT — total chunks: {total_chunks}, reconnects: {self._reconnect_count}")
+            if conn_dead:
+                # Real disconnect — full reconnect needed
+                self._reconnect_count += 1
+                _dbg(f"connection died after {chunks_this_session} chunks, full reconnect (count={self._reconnect_count})")
+                await self._close_session()
+                try:
+                    await self._open_session()
+                except Exception as exc:
+                    _dbg(f"reconnect failed: {exc!r}")
+                    await self._events.put(RealtimeEvent(kind="error", data={"exception": repr(exc)}))
+                    return
+                await asyncio.sleep(0.05)
+            else:
+                # Iterator exited normally (bug #2117 turnComplete premature).
+                # WebSocket still alive — just re-iterate same session, no overhead.
+                turns_reentered += 1
+                _dbg(f"iterator exited after {chunks_this_session} chunks, re-entering session.receive() (turns_reentered={turns_reentered})")
+                await asyncio.sleep(0)
+        _dbg(f"reconnect_loop EXIT — total chunks: {total_chunks}, full reconnects: {self._reconnect_count}, soft re-enters: {turns_reentered}")
 
-    async def _receive_one_session(self) -> int:
-        """Read events from current session until it closes. Returns chunk count."""
+    async def _receive_one_session(self) -> tuple[int, bool]:
+        """Read events from current session until iterator exits.
+
+        Returns (chunk_count, connection_dead). connection_dead=True means
+        WebSocket actually closed (need full reconnect). False means iterator
+        exited but conn alive (just re-iterate, bug #2117 workaround).
+        """
         assert self._session is not None
         chunk_count = 0
+        conn_dead = False
         try:
             async for response in self._session.receive():
                 # 1. Audio bytes direct via response.data (Gemini Live convention for AUDIO modality)
@@ -167,8 +188,11 @@ class GeminiProvider:
                         await self._events.put(RealtimeEvent(kind="session_closed", data={"reason": "turn_complete"}))
         except Exception as exc:
             _dbg(f"_receive_one_session EXCEPTION after {chunk_count} chunks: {exc!r}")
-            # Don't put error event — reconnect_loop will try to recover
-        return chunk_count
+            # Detect dead websocket (ConnectionClosed-family from `websockets` lib)
+            exc_name = type(exc).__name__
+            if "ConnectionClosed" in exc_name or "ClosedError" in exc_name:
+                conn_dead = True
+        return chunk_count, conn_dead
 
     async def send_text(self, text: str) -> None:
         async with self._session_lock:
