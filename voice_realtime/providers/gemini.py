@@ -47,7 +47,14 @@ class GeminiProvider:
         model_id = config.model or DEFAULT_MODEL
         is_native_audio = "native-audio" in model_id
 
-        live_config: dict = {"system_instruction": system_prompt}
+        live_config: dict = {
+            "system_instruction": system_prompt,
+            # Allow long sessions: enable sliding-window context compression
+            # so the session can stay open across many turns without quota errors.
+            "context_window_compression": {"sliding_window": {}},
+            # Enable session resumption (server returns handle, we can resume after disconnect).
+            "session_resumption": {},
+        }
         if is_native_audio or audio:
             # native-audio models REQUIRE audio response.
             live_config["response_modalities"] = ["AUDIO"]
