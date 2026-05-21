@@ -20,12 +20,13 @@ class MicrophoneStream:
                 ...
     """
 
-    def __init__(self, rate: int = 24000, chunk_ms: int = 100, channels: int = 1) -> None:
+    def __init__(self, rate: int = 24000, chunk_ms: int = 200, channels: int = 1) -> None:
         self.rate = rate
         self.chunk_ms = chunk_ms
         self.channels = channels
         self.chunk_frames = int(rate * chunk_ms / 1000)
-        self._queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=64)
+        # Larger queue (256 * 200ms = ~51s buffer) tolerates pikes. drop-oldest still safety net.
+        self._queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=256)
         self._stream: sd.InputStream | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._closed: bool = False

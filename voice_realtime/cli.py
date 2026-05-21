@@ -272,7 +272,7 @@ async def _run_talk(
             pass
 
     async def _mic_pump() -> None:
-        async with MicrophoneStream(rate=input_rate, chunk_ms=100) as mic:
+        async with MicrophoneStream(rate=input_rate, chunk_ms=200) as mic:
             async for chunk in mic:
                 if stop_event.is_set():
                     return

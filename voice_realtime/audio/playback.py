@@ -69,10 +69,10 @@ class AudioPlayer:
                 outdata.fill(0)
 
     async def enqueue(self, pcm16_bytes: bytes) -> None:
+        # No await needed — lock is thread-safe, PortAudio drains in its own thread.
+        # Removed `await asyncio.sleep(0)` (caused 50+ context switches/sec under load).
         with self._lock:
             self._buffer.extend(pcm16_bytes)
-        # Yield control to event loop so caller can interleave
-        await asyncio.sleep(0)
 
     async def drain(self, timeout: float = 5.0) -> None:
         """Wait until buffer is empty or timeout."""
