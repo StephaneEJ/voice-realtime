@@ -1,4 +1,11 @@
-"""Context detector — reads active project context for system prompt injection."""
+"""Context detector — reads active project context for system prompt injection.
+
+Strategy : a naive `text[:N]` slice on long project notes truncates the most
+recent and operationally-relevant sections (Road Map status, Bilan livraison,
+Reste à faire). Instead, we parse the markdown by H2/H3 headings, score each
+section by priority keywords, and concatenate them in priority order until the
+char budget is exhausted. Frontmatter always kept first.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +16,35 @@ from pathlib import Path
 VAULT_ROOT = Path.home() / "OBSIDIAN" / "2ND_CERVEAU"
 LIFE_PHASES_DIR = VAULT_ROOT / "2 CASQUETTES" / "Life Phases"
 PROJECTS_DIR = VAULT_ROOT / "1 PROJETS"
+
+DEFAULT_MAX_CHARS = 12000
+
+# Keywords that boost section priority — order matters (first match wins).
+SECTION_PRIORITY_KEYWORDS = [
+    ("bilan", 100),          # latest delivery summary
+    ("reste à faire", 95),
+    ("reste a faire", 95),
+    ("road map", 90),
+    ("roadmap", 90),
+    ("actions stéphane", 85),
+    ("actions stephane", 85),
+    ("statut", 80),
+    ("status", 80),
+    ("phase 1", 75),
+    ("phase 2", 75),
+    ("phase 3", 70),
+    ("matrice", 65),
+    ("tests", 60),
+    ("feature requests", 55),
+    ("décisions", 50),
+    ("decisions", 50),
+    ("description", 45),
+    ("contexte", 40),
+    ("code & infra", 35),
+    ("tensions", 20),         # discussion sections — useful but not load-bearing
+    ("questions ouvertes", 15),
+    ("key notes", 10),
+]
 
 
 def find_active_phase() -> Path | None:
@@ -49,7 +85,6 @@ def find_project_note(slug_or_name: str) -> Path | None:
         if not project_dir.is_dir():
             continue
         if pattern in project_dir.name.lower():
-            # Look for the main note inside (same name as folder, or first .md)
             main_note = project_dir / f"{project_dir.name}.md"
             if main_note.exists():
                 return main_note
@@ -59,23 +94,92 @@ def find_project_note(slug_or_name: str) -> Path | None:
     return None
 
 
-def build_context(project_hint: str | None = None, max_chars: int = 6000) -> str:
-    """Build a compact context string suitable for system_instruction injection."""
-    parts: list[str] = []
+def _score_heading(heading: str) -> int:
+    """Return the priority score for a section heading. Default 30 if no match."""
+    h = heading.lower()
+    for needle, score in SECTION_PRIORITY_KEYWORDS:
+        if needle in h:
+            return score
+    return 30
 
-    # 1. Project note if specified
+
+def _split_frontmatter(text: str) -> tuple[str, str]:
+    """Return (frontmatter_block, rest). Empty frontmatter if absent."""
+    if not text.startswith("---\n"):
+        return "", text
+    end = text.find("\n---\n", 4)
+    if end == -1:
+        return "", text
+    return text[: end + 5], text[end + 5 :]
+
+
+def extract_prioritized_sections(text: str, budget: int) -> str:
+    """Split markdown by H2/H3, sort by priority, concatenate to budget.
+
+    Always keeps frontmatter and any preamble before the first H2. Then walks
+    sections in priority order (descending score, ties keep document order),
+    appending until the char budget would be exceeded.
+    """
+    frontmatter, body = _split_frontmatter(text)
+
+    # Find H2/H3 boundaries; preserve preamble (text before first heading).
+    heading_re = re.compile(r"^(#{2,3}) (.+)$", re.MULTILINE)
+    matches = list(heading_re.finditer(body))
+    if not matches:
+        return (frontmatter + body)[:budget]
+
+    preamble = body[: matches[0].start()]
+
+    sections: list[tuple[int, int, str]] = []  # (score, doc_order, content)
+    for i, m in enumerate(matches):
+        start = m.start()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(body)
+        heading_text = m.group(2)
+        content = body[start:end]
+        score = _score_heading(heading_text)
+        sections.append((score, i, content))
+
+    # Sort by descending score, then by document order (stable for ties).
+    sections.sort(key=lambda s: (-s[0], s[1]))
+
+    out_parts = [frontmatter, preamble]
+    used = len(frontmatter) + len(preamble)
+    for _, _, content in sections:
+        if used + len(content) > budget:
+            # Try to fit a truncated version if there's meaningful room left.
+            remaining = budget - used
+            if remaining > 200:
+                out_parts.append(content[:remaining])
+                used = budget
+            break
+        out_parts.append(content)
+        used += len(content)
+
+    return "".join(out_parts)
+
+
+def build_context(project_hint: str | None = None, max_chars: int = DEFAULT_MAX_CHARS) -> str:
+    """Build a compact context string suitable for system_instruction injection.
+
+    Splits the char budget : 70% for the project note (extracted by prioritized
+    sections), 30% for the active phase's daily note (recent activity context).
+    """
+    parts: list[str] = []
+    project_budget = int(max_chars * 0.70)
+    daily_budget = max_chars - project_budget
+
     if project_hint:
         project_note = find_project_note(project_hint)
         if project_note is not None:
             text = project_note.read_text(encoding="utf-8", errors="ignore")
-            parts.append(f"## Projet actif\n{text[:max_chars // 2]}")
+            extracted = extract_prioritized_sections(text, project_budget)
+            parts.append(f"## Projet actif\n{extracted}")
 
-    # 2. Active phase daily note
     phase_dir = find_active_phase()
     if phase_dir is not None:
         daily = read_daily_note(phase_dir)
         if daily:
-            parts.append(f"## Daily note du jour ({phase_dir.name})\n{daily[:max_chars // 3]}")
+            parts.append(f"## Daily note du jour ({phase_dir.name})\n{daily[:daily_budget]}")
 
     text = "\n\n".join(parts)
     return text[:max_chars]
