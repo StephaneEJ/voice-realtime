@@ -53,7 +53,18 @@ class OpenAIRealtimeProvider:
             session_payload["audio"] = {
                 "input": {
                     "format": {"type": "audio/pcm", "rate": OPENAI_AUDIO_SAMPLE_RATE},
-                    "turn_detection": {"type": "server_vad"},
+                    # Defaults (threshold=0.5, silence_duration=200ms) were too sensitive:
+                    # 2026-05-23 test session = 32 speech_started in 59s, one every 1.8s.
+                    # Each false-trigger ran our model_interrupted handler → player.flush()
+                    # cut the model's audio mid-sentence before the user could hear it.
+                    # Threshold 0.75 + 600ms silence requires a deliberate utterance, not
+                    # ambient breathing.
+                    "turn_detection": {
+                        "type": "server_vad",
+                        "threshold": 0.75,
+                        "prefix_padding_ms": 300,
+                        "silence_duration_ms": 600,
+                    },
                     # Enable Whisper-based STT of user audio for terminal transcript
                     "transcription": {"model": "whisper-1"},
                 },
