@@ -152,6 +152,7 @@ async def _run_hello(provider_name: str, api_key: str, model: str, message: str)
 def talk(
     provider: str = typer.Option("gemini", "--provider", "-p", help="openai | gemini"),
     model: str = typer.Option("", "--model", help="Override model id."),
+    voice: str = typer.Option("", "--voice", help="Override voice. OpenAI: alloy|ash|ballad|coral|echo|sage|shimmer|verse. Gemini: Aoede|Charon|Fenrir|Kore|Puck."),
     project: str = typer.Option("", "--project", help="Inject project context from vault (partial name match)."),
     max_minutes: float = typer.Option(15.0, "--max-minutes", help="Hard duration cap (kill switch)."),
     cost_cap: float = typer.Option(3.0, "--cost-cap", help="Hard cost cap USD (kill switch)."),
@@ -220,6 +221,7 @@ def talk(
             clean_terminal=clean_terminal,
             log_path=log_path,
             show_partial=show_partial,
+            voice=voice or None,
         )
     )
 
@@ -236,6 +238,7 @@ async def _run_talk(
     clean_terminal: bool = False,
     log_path: Path | None = None,
     show_partial: bool = False,
+    voice: str | None = None,
 ) -> None:
     # Lazy import audio to avoid PortAudio errors at module load
     from .audio.microphone import MicrophoneStream
@@ -268,7 +271,7 @@ async def _run_talk(
         output_rate = GEMINI_OUTPUT_SAMPLE_RATE
         impl = GeminiProvider()  # type: ignore[assignment]
 
-    pcfg = ProviderConfig(model=model, api_key=api_key, thinking_level="low")
+    pcfg = ProviderConfig(model=model, api_key=api_key, thinking_level="low", voice=voice)
 
     if log_path is not None:
         _info(f"Log file: {log_path}")
