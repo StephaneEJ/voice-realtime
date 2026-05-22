@@ -163,6 +163,11 @@ def talk(
         "-c",
         help="Terminal shows STT transcripts only — everything else (status, summary, warnings) goes to log file. Fatal errors still print.",
     ),
+    show_partial: bool = typer.Option(
+        False,
+        "--show-partial",
+        help="Display partial model transcripts as they stream (debug). Default: hidden to avoid desync between text and audio playback when interrupting.",
+    ),
 ) -> None:
     """M2-M4: duplex audio session with context injection, cost tracking, vault save."""
     try:
@@ -214,6 +219,7 @@ def talk(
             save_note=not no_save,
             clean_terminal=clean_terminal,
             log_path=log_path,
+            show_partial=show_partial,
         )
     )
 
@@ -229,6 +235,7 @@ async def _run_talk(
     save_note: bool,
     clean_terminal: bool = False,
     log_path: Path | None = None,
+    show_partial: bool = False,
 ) -> None:
     # Lazy import audio to avoid PortAudio errors at module load
     from .audio.microphone import MicrophoneStream
@@ -325,8 +332,12 @@ async def _run_talk(
                     console.print(f"[red]send_audio_chunk failed: {exc!r}[/red]")
                     return
 
+    # Bug #1 fix : avoid showing partial model transcripts faster than audio playback.
+    # Default = hidden (sync with audio at turn end). --show-partial re-enables streaming.
+    turn_streamed = False
+
     async def _recv_pump() -> None:
-        nonlocal end_reason
+        nonlocal end_reason, turn_streamed
         try:
             async for event in impl.receive_events():
                 if stop_event.is_set():
@@ -339,12 +350,18 @@ async def _run_talk(
                     text = event.data.get("text", "")
                     if text:
                         transcript_model.append(text)
-                        console.print(f"[green]<<<[/green] {text}", end="")
+                        if show_partial:
+                            console.print(f"[green]<<<[/green] {text}", end="")
+                            turn_streamed = True
                 elif event.kind == "final_transcript_model":
                     text = event.data.get("text", "")
-                    if text and not transcript_model:
-                        transcript_model.append(text)
-                        console.print(f"[green]<<<[/green] {text}")
+                    if text:
+                        if not turn_streamed:
+                            transcript_model.append(text)
+                            console.print(f"[green]<<<[/green] {text}")
+                        else:
+                            console.print()  # close streamed line on its own newline
+                        turn_streamed = False
                 elif event.kind == "partial_transcript_user":
                     text = event.data.get("text", "")
                     if text:
