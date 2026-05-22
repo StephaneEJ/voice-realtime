@@ -11,10 +11,21 @@ from pathlib import Path
 SESSIONS_DIR = Path.home() / ".voice-realtime" / "sessions"
 SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
-# 2026-05-21 pricing (USD per hour, approx).
-# OpenAI gpt-realtime-2: $32/1M input + $64/1M output audio tokens ≈ $5/h conversational
-# Gemini 2.5-flash-native-audio: $3/1M input + $12/1M output ≈ $1.40/h
-DEFAULT_HOURLY_RATE_USD = {
+# 2026-05-22 pricing (USD per hour, approx, conversational mix in/out audio).
+# Per-model rates take priority — fall back to per-provider default if model unknown.
+# OpenAI gpt-realtime-2  : $32/$64 per 1M in/out audio tokens ≈ $5/h
+# OpenAI gpt-realtime-mini : $8/$16 per 1M ≈ $1.25/h (4× cheaper than gpt-realtime-2)
+# Gemini 2.5-flash-native-audio : $3/$12 per 1M ≈ $1.40/h (latest + preview-12-2025 same)
+DEFAULT_HOURLY_RATE_USD_BY_MODEL = {
+    "gpt-realtime-2": 5.0,
+    "gpt-realtime": 5.0,           # latest alias
+    "gpt-realtime-mini": 1.25,
+    "gpt-realtime-1.5": 4.0,       # legacy
+    "gemini-2.5-flash-native-audio-latest": 1.40,
+    "gemini-2.5-flash-native-audio-preview-12-2025": 1.40,
+    "gemini-3.1-flash-live-preview": 1.40,
+}
+DEFAULT_HOURLY_RATE_USD_BY_PROVIDER = {
     "openai": 5.0,
     "gemini": 1.40,
 }
@@ -34,7 +45,11 @@ class CostTracker:
 
     def __post_init__(self) -> None:
         if self.hourly_rate_usd <= 0:
-            self.hourly_rate_usd = DEFAULT_HOURLY_RATE_USD.get(self.provider, 5.0)
+            # Model-specific rate wins ; fall back to provider default ; last resort $5/h.
+            self.hourly_rate_usd = (
+                DEFAULT_HOURLY_RATE_USD_BY_MODEL.get(self.model)
+                or DEFAULT_HOURLY_RATE_USD_BY_PROVIDER.get(self.provider, 5.0)
+            )
 
     @property
     def elapsed_seconds(self) -> float:
