@@ -12,6 +12,7 @@ import asyncio
 import signal
 import sys
 import warnings
+from pathlib import Path
 
 # Suppress google-genai SDK chatty warnings about non-text/non-data parts —
 # these fire on every audio response when modality=AUDIO + output_audio_transcription
@@ -26,7 +27,7 @@ from rich.panel import Panel
 from .config import SECRETS_PATH, load_config
 from .context_loader import build_context
 from .cost_tracker import CostTracker, monthly_total_usd
-from .log import setup_logging
+from .log import get_logger, setup_logging
 from .providers.base import ProviderConfig
 from .providers.gemini import DEFAULT_MODEL as GEMINI_DEFAULT_MODEL, GEMINI_INPUT_SAMPLE_RATE, GEMINI_OUTPUT_SAMPLE_RATE, GeminiProvider
 from .providers.openai_realtime import (
@@ -156,6 +157,12 @@ def talk(
     cost_cap: float = typer.Option(3.0, "--cost-cap", help="Hard cost cap USD (kill switch)."),
     no_save: bool = typer.Option(False, "--no-save", help="Skip saving session note to vault."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Also print debug logs to stderr (default: file only)."),
+    clean_terminal: bool = typer.Option(
+        False,
+        "--clean-terminal",
+        "-c",
+        help="Terminal shows STT transcripts only — everything else (status, summary, warnings) goes to log file. Fatal errors still print.",
+    ),
 ) -> None:
     """M2-M4: duplex audio session with context injection, cost tracking, vault save."""
     try:
@@ -194,7 +201,6 @@ def talk(
         system_prompt = base_prompt
 
     log_path = setup_logging(provider=provider, verbose=verbose)
-    console.print(f"[dim]Log file: {log_path}[/dim]")
 
     asyncio.run(
         _run_talk(
@@ -206,6 +212,8 @@ def talk(
             cost_cap=cost_cap,
             project_hint=project or None,
             save_note=not no_save,
+            clean_terminal=clean_terminal,
+            log_path=log_path,
         )
     )
 
@@ -219,10 +227,29 @@ async def _run_talk(
     cost_cap: float,
     project_hint: str | None,
     save_note: bool,
+    clean_terminal: bool = False,
+    log_path: Path | None = None,
 ) -> None:
     # Lazy import audio to avoid PortAudio errors at module load
     from .audio.microphone import MicrophoneStream
     from .audio.playback import AudioPlayer
+
+    logger = get_logger("voice_realtime.talk")
+
+    def _info(msg: str, *, force: bool = False, style: str = "dim") -> None:
+        """Log to file always; print to terminal if !clean_terminal OR force."""
+        logger.info(msg)
+        if (not clean_terminal) or force:
+            if style:
+                console.print(f"[{style}]{msg}[/{style}]")
+            else:
+                console.print(msg)
+
+    def _panel(text: str, title: str, border_style: str = "cyan", *, force: bool = False) -> None:
+        """Log textual content; render Panel only if !clean_terminal OR force."""
+        logger.info("=== %s ===\n%s", title, text)
+        if (not clean_terminal) or force:
+            console.print(Panel(text, title=title, border_style=border_style))
 
     # Sample rates per provider
     if provider_name == "openai":
@@ -236,23 +263,24 @@ async def _run_talk(
 
     pcfg = ProviderConfig(model=model, api_key=api_key, thinking_level="low")
 
-    console.print(
-        Panel(
-            f"[cyan]Provider:[/cyan] {provider_name} / {model}\n"
-            f"[cyan]Project context:[/cyan] {project_hint or 'none'}\n"
-            f"[cyan]Mic rate:[/cyan] {input_rate} Hz\n"
-            f"[cyan]Max duration:[/cyan] {max_minutes:.0f} min\n"
-            f"[cyan]Cost cap:[/cyan] ${cost_cap:.2f}\n"
-            f"[dim]Ctrl+C to stop.[/dim]",
-            title="voice-realtime talk",
-            border_style="cyan",
-        )
-    )
+    if log_path is not None:
+        _info(f"Log file: {log_path}")
 
-    console.print(f"[dim]Connecting to {provider_name}...[/dim]")
+    header_text = (
+        f"Provider: {provider_name} / {model}\n"
+        f"Project context: {project_hint or 'none'}\n"
+        f"Mic rate: {input_rate} Hz\n"
+        f"Max duration: {max_minutes:.0f} min\n"
+        f"Cost cap: ${cost_cap:.2f}\n"
+        f"Ctrl+C to stop."
+    )
+    _panel(header_text, title="voice-realtime talk", border_style="cyan")
+
+    _info(f"Connecting to {provider_name}...")
     try:
         await impl.connect(pcfg, system_prompt=system_prompt, audio=True)
     except Exception as exc:
+        logger.exception("Connect failed")
         console.print(f"[red]Connect failed: {exc!r}[/red]")
         return
 
@@ -273,7 +301,9 @@ async def _run_talk(
 
     def _request_stop(_sig=None, _frame=None) -> None:
         if not stop_event.is_set():
-            console.print("\n[yellow]Stop requested...[/yellow]")
+            logger.info("Stop requested by user (signal)")
+            if not clean_terminal:
+                console.print("\n[yellow]Stop requested...[/yellow]")
             stop_event.set()
 
     loop = asyncio.get_running_loop()
@@ -291,6 +321,7 @@ async def _run_talk(
                 try:
                     await impl.send_audio_chunk(chunk)
                 except Exception as exc:
+                    logger.exception("send_audio_chunk failed")
                     console.print(f"[red]send_audio_chunk failed: {exc!r}[/red]")
                     return
 
@@ -325,12 +356,14 @@ async def _run_talk(
                         transcript_user.append(text)
                         console.print(f"[cyan]>>>[/cyan] {text}")
                 elif event.kind == "error":
+                    logger.error("Server error: %s", event.data)
                     console.print(f"\n[red]Server error: {event.data}[/red]")
                     end_reason = "server_error"
                     stop_event.set()
                     return
                 # session_closed is per-turn end, don't stop the whole session
         except Exception as exc:
+            logger.exception("recv_pump exception")
             console.print(f"\n[red]recv_pump exception: {exc!r}[/red]")
             end_reason = "recv_exception"
             stop_event.set()
@@ -340,11 +373,13 @@ async def _run_talk(
         while not stop_event.is_set():
             await asyncio.sleep(2.0)
             if tracker.should_warn():
-                console.print(
-                    f"\n[yellow]⚠ Cost warning: ${tracker.estimated_cost_usd:.2f} reached[/yellow]"
-                )
+                warn_msg = f"⚠ Cost warning: ${tracker.estimated_cost_usd:.2f} reached"
+                logger.warning(warn_msg)
+                if not clean_terminal:
+                    console.print(f"\n[yellow]{warn_msg}[/yellow]")
             kill, reason = tracker.should_kill()
             if kill:
+                logger.error("Kill switch fired: %s", reason)
                 console.print(f"\n[red]Kill switch: {reason}[/red]")
                 end_reason = f"kill_switch_{reason}"
                 stop_event.set()
@@ -365,20 +400,18 @@ async def _run_talk(
     player.stop()
 
     # Summary + persist
-    console.print()
-    console.print(
-        Panel(
-            f"Durée : {tracker.elapsed_seconds:.0f}s\n"
-            f"Coût estimé : ${tracker.estimated_cost_usd:.4f}\n"
-            f"User transcripts : {len(transcript_user)} chunks\n"
-            f"Model transcripts : {len(transcript_model)} chunks\n"
-            f"Fin : {end_reason}",
-            title="Session terminée",
-            border_style="green",
-        )
+    if not clean_terminal:
+        console.print()
+    summary_text = (
+        f"Durée : {tracker.elapsed_seconds:.0f}s\n"
+        f"Coût estimé : ${tracker.estimated_cost_usd:.4f}\n"
+        f"User transcripts : {len(transcript_user)} chunks\n"
+        f"Model transcripts : {len(transcript_model)} chunks\n"
+        f"Fin : {end_reason}"
     )
+    _panel(summary_text, title="Session terminée", border_style="green")
     cost_path = tracker.persist(reason=end_reason)
-    console.print(f"[dim]Cost log: {cost_path}[/dim]")
+    _info(f"Cost log: {cost_path}")
 
     if save_note:
         try:
@@ -392,8 +425,9 @@ async def _run_talk(
                 project_hint=project_hint,
                 end_reason=end_reason,
             )
-            console.print(f"[dim]Vault session note: {note_path}[/dim]")
+            _info(f"Vault session note: {note_path}")
         except Exception as exc:
+            logger.exception("Save session note failed")
             console.print(f"[red]Save session note failed: {exc!r}[/red]")
 
 
