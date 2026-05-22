@@ -12,6 +12,7 @@ EventKind = Literal[
     "partial_transcript_model",
     "final_transcript_model",
     "audio_chunk_out",
+    "model_interrupted",
     "tool_call",
     "error",
     "cost_update",

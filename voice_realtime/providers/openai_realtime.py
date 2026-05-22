@@ -110,6 +110,13 @@ class OpenAIRealtimeProvider:
                         await self._events.put(
                             RealtimeEvent(kind="final_transcript_user", data={"text": transcript})
                         )
+                elif etype == "input_audio_buffer.speech_started":
+                    # Server VAD detected user speech. If a model response was in flight,
+                    # the server truncates it — client must flush the audio buffer too,
+                    # otherwise the already-received PCM chunks keep playing for several
+                    # seconds. Always emit (no-op when no audio is buffered).
+                    logger.debug("speech_started — emit model_interrupted")
+                    await self._events.put(RealtimeEvent(kind="model_interrupted", data={}))
                 elif etype == "response.done":
                     await self._events.put(RealtimeEvent(kind="session_closed", data={"reason": "response_done"}))
                 elif etype == "error":

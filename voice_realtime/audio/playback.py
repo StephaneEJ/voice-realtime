@@ -74,6 +74,19 @@ class AudioPlayer:
         with self._lock:
             self._buffer.extend(pcm16_bytes)
 
+    def flush(self) -> int:
+        """Drop all buffered audio immediately. Returns bytes discarded.
+
+        Used when the user interrupts the model: the WebSocket has already
+        streamed several seconds of PCM into our buffer ahead of playback, and
+        we want those frames to NOT play. The PortAudio callback will read
+        zeros (silence) on its next tick since the buffer is empty.
+        """
+        with self._lock:
+            n = len(self._buffer)
+            self._buffer.clear()
+        return n
+
     async def drain(self, timeout: float = 5.0) -> None:
         """Wait until buffer is empty or timeout."""
         deadline = asyncio.get_event_loop().time() + timeout

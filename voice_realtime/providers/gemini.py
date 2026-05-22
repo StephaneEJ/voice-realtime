@@ -166,6 +166,11 @@ class GeminiProvider:
                 # Skip model_turn.parts[*].inline_data — it duplicates response.data (already emitted above).
                 server_content = getattr(response, "server_content", None)
                 if server_content is not None:
+                    # User interrupted the model mid-turn (server VAD detected speech).
+                    # Emit event so client can flush the audio playback buffer.
+                    if getattr(server_content, "interrupted", False):
+                        _dbg("server_content.interrupted=True — user broke in")
+                        await self._events.put(RealtimeEvent(kind="model_interrupted", data={}))
                     # Text transcript parallel to audio (output_audio_transcription)
                     out_transcript = getattr(server_content, "output_transcription", None)
                     if out_transcript is not None:

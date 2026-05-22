@@ -372,6 +372,12 @@ async def _run_talk(
                     if text and not transcript_user:
                         transcript_user.append(text)
                         console.print(f"[cyan]>>>[/cyan] {text}")
+                elif event.kind == "model_interrupted":
+                    # User broke in. Drop any audio already buffered so the model
+                    # stops talking immediately rather than continuing for seconds.
+                    discarded = player.flush()
+                    logger.info("model_interrupted — flushed %d audio bytes", discarded)
+                    turn_streamed = False
                 elif event.kind == "error":
                     logger.error("Server error: %s", event.data)
                     console.print(f"\n[red]Server error: {event.data}[/red]")
