@@ -1018,6 +1018,85 @@ async def _run_talk(
             console.print(f"[red]Save session note failed: {exc!r}[/red]")
 
 
+@app.command()
+def stats(
+    days: int = typer.Option(30, "--days", help="Window of days to report (default 30)."),
+    show_sessions: int = typer.Option(10, "--show", help="N most recent sessions to list."),
+) -> None:
+    """Aggregate stats from local jsonl session logs.
+
+    Local jsonl is the source of truth (cost_tracker.persist always writes
+    there; NocoDB is best-effort mirror). This avoids depending on NocoDB
+    being reachable to view stats.
+    """
+    import json as _json
+    from datetime import datetime, timedelta, timezone
+    from .cost_tracker import SESSIONS_DIR
+
+    if not SESSIONS_DIR.exists():
+        console.print(f"[yellow]No sessions dir: {SESSIONS_DIR}[/yellow]")
+        return
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    records: list[dict] = []
+    for path in sorted(SESSIONS_DIR.glob("*.jsonl")):
+        for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = _json.loads(line)
+            except _json.JSONDecodeError:
+                continue
+            started = rec.get("started_iso", "")
+            if not started:
+                continue
+            try:
+                started_dt = datetime.fromisoformat(started)
+            except ValueError:
+                continue
+            if started_dt < cutoff:
+                continue
+            records.append(rec)
+
+    if not records:
+        console.print(f"[yellow]No sessions in the last {days} days.[/yellow]")
+        return
+
+    total_cost = sum(float(r.get("estimated_cost_usd", 0.0)) for r in records)
+    total_seconds = sum(float(r.get("elapsed_seconds", 0.0)) for r in records)
+    by_provider: dict[str, tuple[int, float, float]] = {}  # name → (count, cost, seconds)
+    for r in records:
+        p = r.get("provider", "?")
+        c, cost, secs = by_provider.get(p, (0, 0.0, 0.0))
+        by_provider[p] = (
+            c + 1,
+            cost + float(r.get("estimated_cost_usd", 0.0)),
+            secs + float(r.get("elapsed_seconds", 0.0)),
+        )
+
+    header = f"Window : last {days} days  |  {len(records)} sessions  |  ${total_cost:.4f}  |  {total_seconds/60:.1f} min"
+    console.print(Panel(header, title="voice-realtime stats", border_style="cyan"))
+
+    # Per-provider breakdown
+    breakdown_lines = []
+    for prov, (c, cost, secs) in sorted(by_provider.items(), key=lambda kv: -kv[1][1]):
+        breakdown_lines.append(f"  {prov:10s} : {c:3d} sessions  ${cost:.4f}  {secs/60:.1f} min")
+    console.print("\n[bold]Par provider :[/bold]")
+    for line in breakdown_lines:
+        console.print(line)
+
+    # Recent sessions
+    console.print(f"\n[bold]{min(show_sessions, len(records))} sessions récentes :[/bold]")
+    for r in sorted(records, key=lambda x: x.get("started_iso", ""), reverse=True)[:show_sessions]:
+        started = r.get("started_iso", "")[:16].replace("T", " ")
+        prov = r.get("provider", "?")
+        secs = float(r.get("elapsed_seconds", 0.0))
+        cost = float(r.get("estimated_cost_usd", 0.0))
+        reason = r.get("end_reason", "?")
+        console.print(f"  {started}  {prov:8s}  {secs/60:5.1f} min  ${cost:.4f}  [{reason}]")
+
+
 def main() -> None:
     app()
 
