@@ -147,6 +147,26 @@ class OpenAIRealtimeProvider:
         )
         await self._conn.response.create()
 
+    async def send_silent_note(self, text: str) -> None:
+        """Inject a system-role item into the conversation WITHOUT triggering
+        a response. OpenAI Realtime accepts role=system messages that the model
+        treats as instructions/context. Skipping response.create() means no
+        audio is generated — the recap lands in the conversation buffer and
+        is consumed at the next user turn.
+        """
+        if self._conn is None:
+            return
+        try:
+            await self._conn.conversation.item.create(
+                item={
+                    "type": "message",
+                    "role": "system",
+                    "content": [{"type": "input_text", "text": text}],
+                }
+            )
+        except Exception:
+            pass
+
     async def send_audio_chunk(self, pcm16: bytes) -> None:
         assert self._conn is not None
         audio_b64 = base64.b64encode(pcm16).decode("ascii")

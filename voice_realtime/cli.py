@@ -394,6 +394,21 @@ def talk(
         "-k",
         help="Inject the active CLI conversation (auto-detects Claude Code or OpenCode, compacts via claude -p Sonnet if over budget). Lets the voice model pick up where the CLI session left off.",
     ),
+    rolling_recap: bool = typer.Option(
+        True,
+        "--rolling-recap/--no-rolling-recap",
+        help="Periodically inject a compacted recap (claude -p Sonnet) of the last few minutes so the model stays coherent on long sessions. Default: on.",
+    ),
+    recap_interval: float = typer.Option(
+        420.0,
+        "--recap-interval",
+        help="Min seconds between rolling recaps (default 420 = 7 min).",
+    ),
+    recap_turns: int = typer.Option(
+        25,
+        "--recap-turns",
+        help="Trigger a rolling recap after this many user turns even if interval not reached (default 25).",
+    ),
 ) -> None:
     """M2-M4: duplex audio session with context injection, cost tracking, vault save."""
     try:
@@ -429,7 +444,11 @@ def talk(
         "Stéphane), tu réponds UNIQUEMENT et EXCLUSIVEMENT par cette phrase courte : "
         "« Salut Stéphane, je suis connecté, je t'écoute. » — RIEN d'autre. Pas de "
         "récap projet, pas de Phase 2, pas de questions, pas de proposition. Tu dis "
-        "juste cette phrase puis tu te tais et tu attends sa première vraie question."
+        "juste cette phrase puis tu te tais et tu attends sa première vraie question.\n\n"
+        "NOTES DE CONTEXTE SILENCIEUSES : Si tu reçois un message commençant par "
+        "« [Note système — rappel contexte conversation, NE RÉPONDS PAS, absorbe "
+        "seulement] », c'est un récap automatique de ce qui vient d'être dit. Tu "
+        "l'absorbes en mémoire SANS répondre. Tu attends que Stéphane parle ensuite."
     )
     ctx = build_context(project_hint=project or None, include_cli=cli_context)
     if ctx:
@@ -454,6 +473,9 @@ def talk(
             show_partial=show_partial,
             voice=voice or None,
             auto_summarize=auto_summarize,
+            rolling_recap=rolling_recap,
+            recap_interval=recap_interval,
+            recap_turns=recap_turns,
         )
     )
 
@@ -472,6 +494,9 @@ async def _run_talk(
     show_partial: bool = False,
     voice: str | None = None,
     auto_summarize: bool = True,
+    rolling_recap: bool = True,
+    recap_interval: float = 420.0,
+    recap_turns: int = 25,
 ) -> None:
     # Lazy import audio to avoid PortAudio errors at module load
     from .audio.microphone import MicrophoneStream
@@ -573,6 +598,10 @@ async def _run_talk(
     stop_event = asyncio.Event()
     end_reason = "user_stop"
     connected = True  # impl.connect() has returned successfully above
+
+    # Rolling recap : tracks turns + transcripts between auto-injected recaps.
+    from .rolling_recap import RecapState, maybe_run_recap
+    recap_state = RecapState() if rolling_recap else None
 
     def _vu_bar(level: float, width: int = 28) -> str:
         scaled = min(1.0, level * 4.5)  # speech RMS ~0.05-0.2 maps to 0.2-0.9 bar
@@ -694,6 +723,8 @@ async def _run_talk(
                     text = event.data.get("text", "")
                     if text:
                         transcript_model.append(text)
+                        if recap_state is not None:
+                            recap_state.add_model(text)
                         if show_partial:
                             console.print(f"[green]<<<[/green] {text}", end="")
                             turn_streamed = True
@@ -702,6 +733,8 @@ async def _run_talk(
                     if text:
                         if not turn_streamed:
                             transcript_model.append(text)
+                            if recap_state is not None:
+                                recap_state.add_model(text)
                             console.print(f"[green]<<<[/green] {text}")
                         else:
                             console.print()  # close streamed line on its own newline
@@ -711,6 +744,8 @@ async def _run_talk(
                     text = event.data.get("text", "")
                     if text:
                         transcript_user.append(text)
+                        if recap_state is not None:
+                            recap_state.add_user(text)
                         console.print(f"[cyan]>>>[/cyan] {text}", end="")
                         # Voice kill switch — Gemini Live only emits partial_*,
                         # never final_*. Check killchat keyword on each partial.
@@ -723,6 +758,8 @@ async def _run_talk(
                     text = event.data.get("text", "")
                     if text and not transcript_user:
                         transcript_user.append(text)
+                        if recap_state is not None:
+                            recap_state.add_user(text)
                         console.print(f"[cyan]>>>[/cyan] {text}")
                     # Voice kill switch : the isolated word "killchat" stops the session.
                     if text and _is_killchat_keyword(text):
@@ -768,10 +805,43 @@ async def _run_talk(
                 stop_event.set()
                 return
 
+    async def _recap_pump() -> None:
+        """Periodically compact recent turns and inject as a silent note."""
+        if recap_state is None:
+            return
+        # First check after ~half the interval so even short sessions can recap.
+        # Then poll every 30s; the trigger logic inside maybe_run_recap decides.
+        await asyncio.sleep(min(60.0, recap_interval / 2.0))
+        while not stop_event.is_set():
+            try:
+                recap = await maybe_run_recap(
+                    recap_state,
+                    interval_seconds=recap_interval,
+                    turn_trigger=recap_turns,
+                )
+            except Exception as exc:
+                logger.warning("recap compact failed: %r", exc)
+                recap = None
+            if recap:
+                turns_in_recap = recap_state.user_turns_since_recap
+                try:
+                    await impl.send_silent_note(recap)
+                    recap_state.reset()
+                    logger.info(
+                        "rolling recap #%d injected (%d chars, %d user turns)",
+                        recap_state.recap_count,
+                        len(recap),
+                        turns_in_recap,
+                    )
+                except Exception as exc:
+                    logger.warning("send_silent_note failed: %r", exc)
+            await asyncio.sleep(30.0)
+
     mic_task = asyncio.create_task(_mic_pump())
     recv_task = asyncio.create_task(_recv_pump())
     cost_task = asyncio.create_task(_cost_monitor())
     vu_task = asyncio.create_task(_vu_pump())
+    recap_task = asyncio.create_task(_recap_pump()) if recap_state is not None else None
 
     await stop_event.wait()
 
@@ -794,7 +864,12 @@ async def _run_talk(
     recv_task.cancel()
     cost_task.cancel()
     vu_task.cancel()
-    await asyncio.gather(mic_task, recv_task, cost_task, vu_task, return_exceptions=True)
+    if recap_task is not None:
+        recap_task.cancel()
+    pending = [mic_task, recv_task, cost_task, vu_task]
+    if recap_task is not None:
+        pending.append(recap_task)
+    await asyncio.gather(*pending, return_exceptions=True)
 
     await player.drain(timeout=5.0)
     await impl.close()

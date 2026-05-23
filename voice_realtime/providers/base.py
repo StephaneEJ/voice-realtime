@@ -43,6 +43,17 @@ class RealtimeVoiceProvider(Protocol):
 
     async def send_text(self, text: str) -> None: ...
 
+    async def send_silent_note(self, text: str) -> None:
+        """Inject text into the conversation history WITHOUT triggering a reply.
+
+        Used by the rolling-context-window feature to top up the model with a
+        compacted recap of the last ~7 min, without making the model talk.
+        Default fallback: a wrapped send_text — provider impls should override
+        with a turn_complete=False (Gemini) or response-less create (OpenAI)
+        path so the model truly stays silent.
+        """
+        await self.send_text(text)
+
     async def send_audio_chunk(self, pcm16: bytes) -> None: ...
 
     def receive_events(self) -> AsyncIterator[RealtimeEvent]: ...

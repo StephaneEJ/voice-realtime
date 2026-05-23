@@ -207,6 +207,24 @@ class GeminiProvider:
             turn_complete=True,
         )
 
+    async def send_silent_note(self, text: str) -> None:
+        """Inject context with turn_complete=False so Gemini holds the turn
+        open — buffer accepts the content but no model response is triggered
+        until the next user audio arrives with its own turn_complete=True.
+        """
+        async with self._session_lock:
+            session = self._session
+        if session is None:
+            return  # mid-reconnect ; recap dropped silently
+        try:
+            await session.send_client_content(
+                turns={"role": "user", "parts": [{"text": text}]},
+                turn_complete=False,
+            )
+        except Exception:
+            # Don't let a recap failure tear down the session.
+            pass
+
     async def send_audio_chunk(self, pcm16: bytes) -> None:
         # If we're mid-reconnect, session is None — drop chunk silently.
         async with self._session_lock:
