@@ -29,6 +29,7 @@ from rich.text import Text
 from .config import SECRETS_PATH, load_config
 from .context_loader import build_context
 from .cost_tracker import CostTracker, monthly_total_usd
+from .latency_tracker import LatencyTracker
 from .log import get_logger, setup_logging
 from .providers.base import ProviderConfig
 from .providers.gemini import DEFAULT_MODEL as GEMINI_DEFAULT_MODEL, GEMINI_INPUT_SAMPLE_RATE, GEMINI_OUTPUT_SAMPLE_RATE, GeminiProvider
@@ -38,6 +39,13 @@ from .providers.openai_realtime import (
     OpenAIRealtimeProvider,
 )
 from .session_saver import save_session_note
+from .system_audio import (
+    acquire_lock,
+    drain_jarvis_queue,
+    pause_external_media,
+    release_lock,
+    resume_external_media,
+)
 
 app = typer.Typer(
     add_completion=False,
@@ -294,12 +302,28 @@ async def _run_talk(
     )
     _panel(header_text, title="voice-realtime talk", border_style="cyan")
 
+    # Pause external media + acquire Jarvis TTS lock BEFORE opening the
+    # microphone — anything still playing would pollute the input stream.
+    media_state = pause_external_media()
+    acquire_lock()
+    if media_state.deezer_pids or media_state.spotify_was_playing or media_state.music_was_playing:
+        paused = []
+        if media_state.deezer_pids:
+            paused.append(f"Deezer x{len(media_state.deezer_pids)} (SIGSTOP)")
+        if media_state.spotify_was_playing:
+            paused.append("Spotify")
+        if media_state.music_was_playing:
+            paused.append("Music")
+        _info(f"Paused external media: {', '.join(paused)}")
+
     _info(f"Connecting to {provider_name}...")
     try:
         await impl.connect(pcfg, system_prompt=system_prompt, audio=True)
     except Exception as exc:
         logger.exception("Connect failed")
         console.print(f"[red]Connect failed: {exc!r}[/red]")
+        release_lock()
+        resume_external_media(media_state)
         return
 
     tracker = CostTracker(
@@ -312,6 +336,7 @@ async def _run_talk(
     player = AudioPlayer(rate=output_rate)
     player.start()
     mic_stream = MicrophoneStream(rate=input_rate, chunk_ms=200)
+    latency = LatencyTracker()
 
     transcript_user: list[str] = []
     transcript_model: list[str] = []
@@ -333,10 +358,24 @@ async def _run_talk(
             border = "yellow"
         mic_lvl = mic_stream.level
         out_lvl = player.level
+
+        def _fmt_ms(v: float | None) -> str:
+            return f"{v:.0f}ms" if v is not None else "—"
+
+        ttfa_line = (
+            f"⏱  TTFA  last [bold]{_fmt_ms(latency.last_ttfa_ms)}[/bold]  "
+            f"avg {_fmt_ms(latency.avg_ttfa_ms)}"
+        )
+        ttfi_line = (
+            f"✂  TTFI  last [bold]{_fmt_ms(latency.last_ttfi_ms)}[/bold]  "
+            f"avg {_fmt_ms(latency.avg_ttfi_ms)}"
+        )
         body = (
             f"{head}\n"
             f"🎤 TOI  [cyan]{_vu_bar(mic_lvl)}[/cyan]  [dim]{mic_lvl*100:4.1f}[/dim]\n"
-            f"🔊 IA   [magenta]{_vu_bar(out_lvl)}[/magenta]  [dim]{out_lvl*100:4.1f}[/dim]"
+            f"🔊 IA   [magenta]{_vu_bar(out_lvl)}[/magenta]  [dim]{out_lvl*100:4.1f}[/dim]\n"
+            f"{ttfa_line}\n"
+            f"{ttfi_line}"
         )
         return Panel(Text.from_markup(body), border_style=border, title="voice-realtime live")
 
@@ -363,17 +402,40 @@ async def _run_talk(
         except (NotImplementedError, ValueError):
             pass
 
+    # Client-side barge-in: when user starts speaking while model audio is
+    # still buffered, flush locally without waiting for server VAD →
+    # model_interrupted round-trip (~600ms + buffer ~1-6s on Gemini).
+    BARGE_IN_LEVEL = 0.03  # RMS threshold; lowered from 0.08 — AirPods capture peaks ~0.04-0.06
+    BARGE_IN_MIN_BUFFER = 4800  # 0.1s of audio @ 24kHz/16bit/mono — guards false positives during model silence
+    _last_level_log = 0.0  # throttle telemetry
+
     async def _mic_pump() -> None:
+        nonlocal _last_level_log
         async with mic_stream as mic:
             async for chunk in mic:
                 if stop_event.is_set():
                     return
                 try:
                     await impl.send_audio_chunk(chunk)
+                    latency.on_user_audio_sent()
                 except Exception as exc:
                     logger.exception("send_audio_chunk failed")
                     console.print(f"[red]send_audio_chunk failed: {exc!r}[/red]")
                     return
+                # Telemetry: log mic level when model is mid-speech (helps tune threshold).
+                buf = player.buffered_bytes()
+                lvl = mic_stream.level
+                now = asyncio.get_running_loop().time()
+                if buf > BARGE_IN_MIN_BUFFER and (now - _last_level_log) > 0.5:
+                    logger.info("barge-in telemetry — mic_level=%.4f buf=%d", lvl, buf)
+                    _last_level_log = now
+                # Client-side barge-in: preempt server-side VAD detection.
+                if lvl > BARGE_IN_LEVEL and buf > BARGE_IN_MIN_BUFFER:
+                    latency.on_interrupt_signal()
+                    discarded = player.flush()
+                    latency.on_flush_complete()
+                    if discarded > 0:
+                        logger.info("client barge-in — flushed %d audio bytes (mic level %.4f)", discarded, lvl)
 
     async def _vu_pump() -> None:
         while not stop_event.is_set():
@@ -396,6 +458,7 @@ async def _run_talk(
                 if event.kind == "audio_chunk_out":
                     pcm = event.data.get("pcm16", b"")
                     if pcm:
+                        latency.on_model_audio_received()
                         await player.enqueue(pcm)
                 elif event.kind == "partial_transcript_model":
                     text = event.data.get("text", "")
@@ -413,6 +476,7 @@ async def _run_talk(
                         else:
                             console.print()  # close streamed line on its own newline
                         turn_streamed = False
+                    latency.on_turn_complete()
                 elif event.kind == "partial_transcript_user":
                     text = event.data.get("text", "")
                     if text:
@@ -426,7 +490,9 @@ async def _run_talk(
                 elif event.kind == "model_interrupted":
                     # User broke in. Drop any audio already buffered so the model
                     # stops talking immediately rather than continuing for seconds.
+                    latency.on_interrupt_signal()
                     discarded = player.flush()
+                    latency.on_flush_complete()
                     logger.info("model_interrupted — flushed %d audio bytes", discarded)
                     turn_streamed = False
                 elif event.kind == "error":
@@ -477,6 +543,12 @@ async def _run_talk(
         live.stop()
     except Exception:
         pass
+
+    release_lock()
+    resume_external_media(media_state)
+    queued = drain_jarvis_queue()
+    if queued:
+        _info(f"Drained {queued} Jarvis message(s) from queue")
 
     # Summary + persist
     if not clean_terminal:

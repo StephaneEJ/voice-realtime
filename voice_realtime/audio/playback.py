@@ -94,6 +94,11 @@ class AudioPlayer:
             self._buffer.clear()
         return n
 
+    def buffered_bytes(self) -> int:
+        """Bytes currently waiting to be played. > 0 means model is mid-speech."""
+        with self._lock:
+            return len(self._buffer)
+
     async def drain(self, timeout: float = 5.0) -> None:
         """Wait until buffer is empty or timeout."""
         deadline = asyncio.get_event_loop().time() + timeout
