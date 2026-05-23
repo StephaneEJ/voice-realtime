@@ -1,0 +1,102 @@
+<!--
+  Drop-in HTML fragment for /home/steph/dashboard-perso/src/frontend/voice.html.
+
+  Consumes:
+    GET /api/voice/summary?days=30
+    GET /api/voice/sessions?days=7&limit=50
+
+  Provides : KPI tiles + per-provider breakdown + recent sessions table.
+
+  Styling : matches the dashboard's neutral dark theme. Tweak class names
+  to match the existing /weight/, /food/, /flashcards/ tabs.
+-->
+
+<section id="voice-tab" class="dashboard-tab">
+  <header class="tab-header">
+    <h2>Voice Realtime</h2>
+    <div class="tab-actions">
+      <select id="voice-window" onchange="loadVoice()">
+        <option value="7">7 jours</option>
+        <option value="30" selected>30 jours</option>
+        <option value="90">90 jours</option>
+      </select>
+    </div>
+  </header>
+
+  <div id="voice-kpis" class="kpi-row">
+    <div class="kpi"><span class="kpi-label">Sessions</span><span class="kpi-val" id="vr-sessions">—</span></div>
+    <div class="kpi"><span class="kpi-label">Coût total</span><span class="kpi-val" id="vr-cost">—</span></div>
+    <div class="kpi"><span class="kpi-label">Minutes</span><span class="kpi-val" id="vr-minutes">—</span></div>
+    <div class="kpi">
+      <span class="kpi-label">Budget mois</span>
+      <span class="kpi-val" id="vr-month">—</span>
+      <progress id="vr-month-bar" max="100" value="0"></progress>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Par provider</h3>
+    <table class="data-table">
+      <thead><tr><th>Provider</th><th>Sessions</th><th>Coût</th><th>Minutes</th></tr></thead>
+      <tbody id="vr-provider-rows"></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Sessions récentes</h3>
+    <table class="data-table">
+      <thead>
+        <tr><th>Heure</th><th>Provider</th><th>Modèle</th><th>Durée</th><th>Coût</th><th>Fin</th><th>Projet</th></tr>
+      </thead>
+      <tbody id="vr-sessions-rows"></tbody>
+    </table>
+  </div>
+</section>
+
+<script>
+async function loadVoice() {
+  const days = document.getElementById('voice-window').value;
+  // Summary
+  const sumResp = await fetch(`/api/voice/summary?days=${days}`);
+  if (!sumResp.ok) {
+    document.getElementById('vr-sessions').textContent = 'API down';
+    return;
+  }
+  const s = await sumResp.json();
+  document.getElementById('vr-sessions').textContent = s.total_sessions;
+  document.getElementById('vr-cost').textContent = `$${s.total_cost_usd.toFixed(2)}`;
+  document.getElementById('vr-minutes').textContent = `${s.total_minutes.toFixed(0)} min`;
+  document.getElementById('vr-month').textContent =
+    `$${s.current_month_cost_usd.toFixed(2)} / $${s.current_month_budget_usd.toFixed(0)} (${s.current_month_pct.toFixed(0)}%)`;
+  document.getElementById('vr-month-bar').value = Math.min(100, s.current_month_pct);
+
+  const provRows = document.getElementById('vr-provider-rows');
+  provRows.innerHTML = '';
+  Object.entries(s.by_provider)
+    .sort(([, a], [, b]) => b.cost_usd - a.cost_usd)
+    .forEach(([prov, d]) => {
+      provRows.insertAdjacentHTML('beforeend',
+        `<tr><td>${prov}</td><td>${d.sessions}</td><td>$${d.cost_usd.toFixed(4)}</td><td>${d.minutes.toFixed(1)}</td></tr>`);
+    });
+
+  // Sessions table (always 7-day window for the recent list)
+  const sessResp = await fetch(`/api/voice/sessions?days=7&limit=50`);
+  if (!sessResp.ok) return;
+  const rows = await sessResp.json();
+  const sessRows = document.getElementById('vr-sessions-rows');
+  sessRows.innerHTML = '';
+  rows.forEach(r => {
+    const t = (r.started_iso || '').replace('T', ' ').slice(0, 16);
+    const mins = ((r.elapsed_seconds || 0) / 60).toFixed(1);
+    const cost = (r.estimated_cost_usd || 0).toFixed(4);
+    sessRows.insertAdjacentHTML('beforeend',
+      `<tr>
+        <td>${t}</td><td>${r.provider || ''}</td><td>${r.model || ''}</td>
+        <td>${mins} min</td><td>$${cost}</td>
+        <td>${r.end_reason || ''}</td><td>${r.project_hint || ''}</td>
+      </tr>`);
+  });
+}
+
+document.addEventListener('DOMContentLoaded', loadVoice);
+</script>
