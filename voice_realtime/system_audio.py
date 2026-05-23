@@ -33,9 +33,10 @@ class MediaState:
     music_was_playing: bool = False
 
 
-def _pgrep(name: str) -> list[int]:
+def _pgrep(name: str, exact: bool = True) -> list[int]:
     try:
-        result = subprocess.run(["pgrep", "-x", name], capture_output=True, text=True, timeout=2)
+        flag = "-x" if exact else "-f"
+        result = subprocess.run(["pgrep", flag, name], capture_output=True, text=True, timeout=2)
         if result.returncode == 0:
             return [int(p) for p in result.stdout.split() if p]
     except (OSError, subprocess.SubprocessError):
@@ -55,7 +56,11 @@ def _applescript(script: str, timeout: float = 2.0) -> str:
 
 def pause_external_media() -> MediaState:
     state = MediaState()
-    state.deezer_pids = _pgrep("Deezer")
+    # Match all Deezer-related processes (main + 5 helpers: GPU, Network,
+    # Renderer, AudioService, crashpad). The AudioService child runs the
+    # actual audio rendering — freezing only the main PID lets sound continue
+    # until the OS audio buffer drains.
+    state.deezer_pids = _pgrep("Deezer", exact=False)
     for pid in state.deezer_pids:
         try:
             os.kill(pid, signal_module.SIGSTOP)
