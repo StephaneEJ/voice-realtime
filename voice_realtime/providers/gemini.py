@@ -61,7 +61,7 @@ class GeminiProvider:
         if is_native_audio or self._audio_mode:
             live_config["response_modalities"] = ["AUDIO"]
             live_config["speech_config"] = {
-                "voice_config": {"prebuilt_voice_config": {"voice_name": (self._provider_config.voice if self._provider_config else None) or "Aoede"}}
+                "voice_config": {"prebuilt_voice_config": {"voice_name": (self._provider_config.voice if self._provider_config else None) or "Charon"}}
             }
             live_config["output_audio_transcription"] = {}
             if self._audio_mode:

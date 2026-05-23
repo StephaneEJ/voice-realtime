@@ -185,6 +185,170 @@ async def _run_hello(provider_name: str, api_key: str, model: str, message: str)
 
 
 # -----------------------------------------------------------------------------
+# Summarize — turn a raw voice session note into a structured synthesis
+# -----------------------------------------------------------------------------
+
+
+@app.command()
+def summarize(
+    transcript: str = typer.Argument(..., help="Path to a voice session note (markdown)."),
+    project: str = typer.Option("", "--project", "-p", help="Project hint for context + append target."),
+    model: str = typer.Option("claude-sonnet-4-6", "--model", help="claude -p model id."),
+) -> None:
+    """Synthesize a voice session transcript via `claude -p` and append to project note."""
+    from .summarizer import summarize_session
+
+    path = Path(transcript).expanduser()
+    if not path.is_absolute():
+        # Try relative to vault voice-sessions dir.
+        vault_sessions = Path.home() / "OBSIDIAN" / "2ND_CERVEAU" / "_System" / "voice-sessions"
+        candidate = vault_sessions / transcript
+        if candidate.exists():
+            path = candidate
+    if not path.exists():
+        console.print(f"[red]Transcript not found: {path}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[cyan]Summarizing {path.name} (model={model}, project={project or '—'})...[/cyan]")
+    try:
+        result = summarize_session(path, project_hint=project or None, model=model)
+    except Exception as exc:
+        console.print(f"[red]Summary failed: {exc!r}[/red]")
+        raise typer.Exit(1)
+
+    lines = [
+        f"Sujet : {result.topic_summary}",
+        f"Décisions : {len(result.decisions)}",
+        f"Actions : {len(result.actions)}",
+        f"Insights : {len(result.insights)}",
+        f"Questions ouvertes : {len(result.unresolved_questions)}",
+    ]
+    if result.appended and result.project_note_path:
+        lines.append(f"Appendé à : {result.project_note_path}")
+    elif project:
+        lines.append(f"Note projet « {project} » introuvable — synthèse non appendée")
+    console.print(Panel("\n".join(lines), title="Synthèse", border_style="green"))
+
+
+# -----------------------------------------------------------------------------
+# Voice preview — short audio sample with each available voice (no mic, no save)
+# -----------------------------------------------------------------------------
+
+
+GEMINI_VOICES = ["Aoede", "Charon", "Fenrir", "Kore", "Puck"]
+OPENAI_VOICES = ["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"]
+
+
+@app.command(name="preview-voices")
+def preview_voices(
+    provider: str = typer.Option("gemini", "--provider", "-p", help="openai | gemini"),
+    seconds_per_voice: float = typer.Option(6.0, "--seconds", help="Audio capture window per voice."),
+) -> None:
+    """Play a short sample with each available voice for the provider."""
+    try:
+        cfg = load_config()
+    except FileNotFoundError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+    if provider == "gemini":
+        if not cfg.has_gemini:
+            console.print("[red]GEMINI_API_KEY missing[/red]")
+            raise typer.Exit(1)
+        voices = GEMINI_VOICES
+        api_key = cfg.gemini_api_key
+        model = GEMINI_DEFAULT_MODEL
+        rate = GEMINI_OUTPUT_SAMPLE_RATE
+    elif provider == "openai":
+        if not cfg.has_openai:
+            console.print("[red]OPENAI_API_KEY missing[/red]")
+            raise typer.Exit(1)
+        voices = OPENAI_VOICES
+        api_key = cfg.openai_api_key
+        model = OPENAI_DEFAULT_MODEL
+        rate = OPENAI_AUDIO_SAMPLE_RATE
+    else:
+        console.print(f"[red]Unknown provider: {provider}[/red]")
+        raise typer.Exit(1)
+
+    asyncio.run(_run_preview_voices(provider, voices, api_key, model, rate, seconds_per_voice))
+
+
+async def _preview_one_voice(
+    provider_name: str,
+    voice: str,
+    api_key: str,
+    model: str,
+    rate: int,
+    capture_seconds: float,
+) -> None:
+    from .audio.playback import AudioPlayer
+
+    impl = GeminiProvider() if provider_name == "gemini" else OpenAIRealtimeProvider()
+    pcfg = ProviderConfig(model=model, api_key=api_key, thinking_level="low", voice=voice)
+    player = AudioPlayer(rate=rate)
+    player.start()
+
+    async def _recv() -> None:
+        try:
+            async for event in impl.receive_events():
+                if event.kind == "audio_chunk_out":
+                    pcm = event.data.get("pcm16", b"")
+                    if pcm:
+                        await player.enqueue(pcm)
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass
+
+    recv_task: asyncio.Task | None = None
+    try:
+        await impl.connect(
+            pcfg,
+            system_prompt="Tu es un échantillon de voix. Réponds très brièvement.",
+            audio=True,
+        )
+        recv_task = asyncio.create_task(_recv())
+        await impl.send_text(
+            f"Dis exactement et uniquement la phrase : « Bonjour Stéphane, je suis la voix {voice}. » Rien d'autre."
+        )
+        await asyncio.sleep(capture_seconds)
+    except Exception as exc:
+        console.print(f"[red]Voice {voice} failed: {exc!r}[/red]")
+    finally:
+        if recv_task is not None:
+            recv_task.cancel()
+            await asyncio.gather(recv_task, return_exceptions=True)
+        try:
+            await impl.close()
+        except Exception:
+            pass
+        await player.drain(timeout=3.0)
+        player.stop()
+
+
+async def _run_preview_voices(
+    provider_name: str,
+    voices: list[str],
+    api_key: str,
+    model: str,
+    rate: int,
+    capture_seconds: float,
+) -> None:
+    console.print(Panel(
+        f"Provider: {provider_name}\nVoices: {', '.join(voices)}\nCapture per voice: {capture_seconds}s",
+        title="voice-realtime preview-voices",
+        border_style="cyan",
+    ))
+    for voice in voices:
+        console.print(f"\n[cyan bold]>>> Voix : {voice}[/cyan bold]")
+        await _preview_one_voice(provider_name, voice, api_key, model, rate, capture_seconds)
+        # Small gap so the audio drains and the next voice doesn't overlap.
+        await asyncio.sleep(1.5)
+    console.print("\n[green]Preview terminé.[/green]")
+
+
+# -----------------------------------------------------------------------------
 # M2-M4 talk command — full duplex audio session with context + cost + save
 # -----------------------------------------------------------------------------
 
