@@ -379,6 +379,12 @@ def talk(
         "--summarize/--no-summarize",
         help="Auto-run summarize-voice at session end. Default: on (requires --project for append to work).",
     ),
+    claude_context: bool = typer.Option(
+        False,
+        "--claude-context",
+        "-k",
+        help="Inject the active Claude Code conversation (compacted via claude -p Sonnet if needed). Lets the voice model pick up where the CLI session left off.",
+    ),
 ) -> None:
     """M2-M4: duplex audio session with context injection, cost tracking, vault save."""
     try:
@@ -416,7 +422,7 @@ def talk(
         "récap projet, pas de Phase 2, pas de questions, pas de proposition. Tu dis "
         "juste cette phrase puis tu te tais et tu attends sa première vraie question."
     )
-    ctx = build_context(project_hint=project or None)
+    ctx = build_context(project_hint=project or None, include_claude_code=claude_context)
     if ctx:
         system_prompt = base_prompt + "\n\n# Contexte vault (utilise si pertinent)\n\n" + ctx
     else:
