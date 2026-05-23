@@ -374,6 +374,11 @@ def talk(
         "--show-partial",
         help="Display partial model transcripts as they stream (debug). Default: hidden to avoid desync between text and audio playback when interrupting.",
     ),
+    auto_summarize: bool = typer.Option(
+        True,
+        "--summarize/--no-summarize",
+        help="Auto-run summarize-voice at session end. Default: on (requires --project for append to work).",
+    ),
 ) -> None:
     """M2-M4: duplex audio session with context injection, cost tracking, vault save."""
     try:
@@ -433,6 +438,7 @@ def talk(
             log_path=log_path,
             show_partial=show_partial,
             voice=voice or None,
+            auto_summarize=auto_summarize,
         )
     )
 
@@ -450,6 +456,7 @@ async def _run_talk(
     log_path: Path | None = None,
     show_partial: bool = False,
     voice: str | None = None,
+    auto_summarize: bool = True,
 ) -> None:
     # Lazy import audio to avoid PortAudio errors at module load
     from .audio.microphone import MicrophoneStream
@@ -801,6 +808,16 @@ async def _run_talk(
     cost_path = tracker.persist(reason=end_reason)
     _info(f"Cost log: {cost_path}")
 
+    # Budget alert : ping Telegram once per month if we crossed 80% of the cap.
+    try:
+        from .telegram_alert import maybe_alert_budget
+        cfg_for_alert = load_config()
+        monthly = monthly_total_usd()
+        if maybe_alert_budget(monthly, cfg_for_alert.monthly_budget_usd, threshold_pct=80.0):
+            _info(f"Telegram budget alert sent ({100*monthly/cfg_for_alert.monthly_budget_usd:.0f}%)")
+    except Exception as exc:
+        logger.warning("Budget alert check failed (non-fatal): %r", exc)
+
     if save_note:
         try:
             note_path = save_session_note(
@@ -814,6 +831,28 @@ async def _run_talk(
                 end_reason=end_reason,
             )
             _info(f"Vault session note: {note_path}")
+
+            # Auto-summarize via `claude -p` Sonnet — appends synthesis to project note.
+            if auto_summarize and (transcript_user or transcript_model):
+                _info("Auto-summarize en cours (claude -p Sonnet)...", force=True)
+                try:
+                    from .summarizer import summarize_session
+                    result = summarize_session(note_path, project_hint=project_hint)
+                    head = (
+                        f"Sujet : {result.topic_summary[:80]}\n"
+                        f"Décisions : {len(result.decisions)}  |  "
+                        f"Actions : {len(result.actions)}  |  "
+                        f"Insights : {len(result.insights)}  |  "
+                        f"Questions ouvertes : {len(result.unresolved_questions)}"
+                    )
+                    if result.appended and result.project_note_path:
+                        head += f"\nAppendé à : {result.project_note_path.name}"
+                    elif project_hint:
+                        head += f"\nProjet « {project_hint} » introuvable — synthèse non appendée"
+                    _panel(head, title="Auto-summarize", border_style="cyan", force=True)
+                except Exception as exc:
+                    logger.exception("Auto-summarize failed")
+                    console.print(f"[yellow]Auto-summarize failed (non-fatal): {exc!r}[/yellow]")
         except Exception as exc:
             logger.exception("Save session note failed")
             console.print(f"[red]Save session note failed: {exc!r}[/red]")
