@@ -142,6 +142,11 @@ class GeminiProvider:
         exited but conn alive (just re-iterate, bug #2117 workaround).
         """
         assert self._session is not None
+        # Accumulate model transcript across partials within one turn so we can
+        # emit a single final_transcript_model on turn_complete. Without this,
+        # clean-terminal mode + Gemini (which never emits final_*) leaves the
+        # user staring at a silent terminal even though the model is speaking.
+        model_text_buffer = ""
         chunk_count = 0
         conn_dead = False
         try:
@@ -176,6 +181,7 @@ class GeminiProvider:
                     if out_transcript is not None:
                         transcript_text = getattr(out_transcript, "text", None)
                         if transcript_text:
+                            model_text_buffer += transcript_text
                             await self._events.put(
                                 RealtimeEvent(kind="partial_transcript_model", data={"text": transcript_text})
                             )
@@ -188,7 +194,22 @@ class GeminiProvider:
                                 RealtimeEvent(kind="partial_transcript_user", data={"text": in_text})
                             )
                     if getattr(server_content, "turn_complete", False):
+                        # Flush accumulated model text as a final transcript so
+                        # clean-terminal mode displays one tidy line per model
+                        # turn instead of staying silent.
+                        if model_text_buffer:
+                            await self._events.put(
+                                RealtimeEvent(kind="final_transcript_model", data={"text": model_text_buffer})
+                            )
+                            model_text_buffer = ""
                         await self._events.put(RealtimeEvent(kind="session_closed", data={"reason": "turn_complete"}))
+                    # Also flush on user interruption — what the model said up
+                    # to the cutoff is still real, the user should see it.
+                    elif getattr(server_content, "interrupted", False) and model_text_buffer:
+                        await self._events.put(
+                            RealtimeEvent(kind="final_transcript_model", data={"text": model_text_buffer})
+                        )
+                        model_text_buffer = ""
         except Exception as exc:
             _dbg(f"_receive_one_session EXCEPTION after {chunk_count} chunks: {exc!r}")
             # Detect dead websocket (ConnectionClosed-family from `websockets` lib)

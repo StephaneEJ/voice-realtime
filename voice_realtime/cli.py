@@ -404,10 +404,11 @@ def talk(
         "--recap-interval",
         help="Min seconds between rolling recaps (default 420 = 7 min).",
     ),
-    recap_turns: int = typer.Option(
-        25,
-        "--recap-turns",
-        help="Trigger a rolling recap after this many user turns even if interval not reached (default 25).",
+    recap_user_chars: int = typer.Option(
+        2500,
+        "--recap-user-chars",
+        "--recap-turns",  # legacy alias from the buggy turn-based trigger
+        help="Trigger a rolling recap after this many cumulative user transcript chars (default 2500 ≈ 3-4 min of conversation). Char-based instead of turn-based because Gemini emits one partial per syllable.",
     ),
 ) -> None:
     """M2-M4: duplex audio session with context injection, cost tracking, vault save."""
@@ -475,7 +476,7 @@ def talk(
             auto_summarize=auto_summarize,
             rolling_recap=rolling_recap,
             recap_interval=recap_interval,
-            recap_turns=recap_turns,
+            recap_user_chars=recap_user_chars,
         )
     )
 
@@ -496,7 +497,7 @@ async def _run_talk(
     auto_summarize: bool = True,
     rolling_recap: bool = True,
     recap_interval: float = 420.0,
-    recap_turns: int = 25,
+    recap_user_chars: int = 2500,
 ) -> None:
     # Lazy import audio to avoid PortAudio errors at module load
     from .audio.microphone import MicrophoneStream
@@ -817,21 +818,21 @@ async def _run_talk(
                 recap = await maybe_run_recap(
                     recap_state,
                     interval_seconds=recap_interval,
-                    turn_trigger=recap_turns,
+                    char_trigger=recap_user_chars,
                 )
             except Exception as exc:
                 logger.warning("recap compact failed: %r", exc)
                 recap = None
             if recap:
-                turns_in_recap = recap_state.user_turns_since_recap
+                chars_in_recap = recap_state.user_chars_since_recap
                 try:
                     await impl.send_silent_note(recap)
                     recap_state.reset()
                     logger.info(
-                        "rolling recap #%d injected (%d chars, %d user turns)",
+                        "rolling recap #%d injected (%d recap chars, %d user transcript chars consumed)",
                         recap_state.recap_count,
                         len(recap),
-                        turns_in_recap,
+                        chars_in_recap,
                     )
                 except Exception as exc:
                     logger.warning("send_silent_note failed: %r", exc)

@@ -20,7 +20,11 @@ import time
 from dataclasses import dataclass, field
 
 DEFAULT_INTERVAL_SECONDS = 420.0  # 7 min
-DEFAULT_TURN_TRIGGER = 25
+# Char-based trigger instead of turn-based : Gemini emits one partial transcript
+# per syllable, so counting "turns" by partial events explodes (28 partials in
+# 2 min = a recap every 100 seconds, way too often). Characters of accumulated
+# user text are a stable proxy across providers.
+DEFAULT_USER_CHAR_TRIGGER = 2500   # ≈ 3-4 min of brisk conversation
 MIN_TRANSCRIPT_CHARS = 600  # below this, recap not worth it
 
 RECAP_PROMPT = """Tu reçois une portion de conversation vocale entre Stéphane et un assistant
@@ -40,31 +44,35 @@ Conversation :
 
 @dataclass
 class RecapState:
-    """Tracks turns + transcripts between recaps."""
+    """Tracks transcript chars between recaps. Char-based — not turn-based —
+    because Gemini emits one partial per syllable (turn counts inflate ~30x).
+    """
 
     started_at: float = field(default_factory=time.monotonic)
     last_recap_at: float = field(default_factory=time.monotonic)
     user_chunks_since_recap: list[str] = field(default_factory=list)
     model_chunks_since_recap: list[str] = field(default_factory=list)
-    user_turns_since_recap: int = 0
+    user_chars_since_recap: int = 0
     recap_count: int = 0
 
     def add_user(self, text: str) -> None:
-        if text and text.strip():
-            self.user_chunks_since_recap.append(text.strip())
-            self.user_turns_since_recap += 1
+        text = (text or "").strip()
+        if text:
+            self.user_chunks_since_recap.append(text)
+            self.user_chars_since_recap += len(text)
 
     def add_model(self, text: str) -> None:
-        if text and text.strip():
-            self.model_chunks_since_recap.append(text.strip())
+        text = (text or "").strip()
+        if text:
+            self.model_chunks_since_recap.append(text)
 
     def render_transcript(self) -> str:
         """Render the buffer as a flat dialogue. We don't have strict turn
-        boundaries from chunks, so we group consecutive same-role chunks.
+        boundaries from chunks (Gemini emits partials per syllable), so we
+        group all user chunks then all model chunks.
         """
         if not self.user_chunks_since_recap and not self.model_chunks_since_recap:
             return ""
-        # Simple form : "User says: ..." / "Model says: ..." with chunks joined.
         user_text = " ".join(self.user_chunks_since_recap)
         model_text = " ".join(self.model_chunks_since_recap)
         out: list[str] = []
@@ -78,7 +86,7 @@ class RecapState:
         self.last_recap_at = time.monotonic()
         self.user_chunks_since_recap.clear()
         self.model_chunks_since_recap.clear()
-        self.user_turns_since_recap = 0
+        self.user_chars_since_recap = 0
         self.recap_count += 1
 
 
@@ -117,17 +125,21 @@ def wrap_for_silent_injection(recap: str) -> str:
 async def maybe_run_recap(
     state: RecapState,
     interval_seconds: float,
-    turn_trigger: int,
+    char_trigger: int,
 ) -> str | None:
     """Return a compact recap string if the trigger conditions are met, else None.
+
+    Triggers on either:
+    - elapsed time since last recap >= interval_seconds, OR
+    - accumulated user transcript chars >= char_trigger.
 
     Runs `compact_recap` in a thread executor so we don't block the asyncio
     event loop while `claude -p` does its 5-30s synchronous work.
     """
     elapsed = time.monotonic() - state.last_recap_at
     time_trigger = elapsed >= interval_seconds
-    turns_trigger = state.user_turns_since_recap >= turn_trigger
-    if not (time_trigger or turns_trigger):
+    chars_trigger = state.user_chars_since_recap >= char_trigger
+    if not (time_trigger or chars_trigger):
         return None
     transcript = state.render_transcript()
     if not transcript:
