@@ -167,24 +167,25 @@ def extract_prioritized_sections(text: str, budget: int) -> str:
 def build_context(
     project_hint: str | None = None,
     max_chars: int = DEFAULT_MAX_CHARS,
-    include_claude_code: bool = False,
+    include_cli: bool = False,
 ) -> str:
     """Build a compact context string suitable for system_instruction injection.
 
-    Budget split when `include_claude_code=False` : 70% project / 30% daily.
-    When `include_claude_code=True` : 50% project / 20% daily / 30% Claude Code
-    transcript (compacted via `claude -p` if it exceeds the threshold).
+    Budget split when `include_cli=False` : 70% project / 30% daily.
+    When `include_cli=True` : 50% project / 20% daily / 30% active CLI
+    transcript (Claude Code OR OpenCode, auto-detected ; compacted via
+    `claude -p` if it exceeds the threshold).
     """
     parts: list[str] = []
 
-    if include_claude_code:
+    if include_cli:
         project_budget = int(max_chars * 0.50)
         daily_budget = int(max_chars * 0.20)
-        claude_budget = max_chars - project_budget - daily_budget
+        cli_budget = max_chars - project_budget - daily_budget
     else:
         project_budget = int(max_chars * 0.70)
         daily_budget = max_chars - project_budget
-        claude_budget = 0
+        cli_budget = 0
 
     if project_hint:
         project_note = find_project_note(project_hint)
@@ -199,15 +200,15 @@ def build_context(
         if daily:
             parts.append(f"## Daily note du jour ({phase_dir.name})\n{daily[:daily_budget]}")
 
-    if include_claude_code and claude_budget > 0:
+    if include_cli and cli_budget > 0:
         # Imported lazily so users without claude CLI don't pay the import cost.
-        from voice_realtime.claude_code_context import build_claude_code_context
-        cc_block = build_claude_code_context(
-            compact_threshold=claude_budget,
-            compact_target=claude_budget - 200,
+        from voice_realtime.cli_context import build_cli_context
+        cc_block = build_cli_context(
+            compact_threshold=cli_budget,
+            compact_target=cli_budget - 200,
         )
         if cc_block:
-            parts.append(cc_block[:claude_budget])
+            parts.append(cc_block[:cli_budget])
 
     text = "\n\n".join(parts)
     return text[:max_chars]
