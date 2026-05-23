@@ -1097,6 +1097,110 @@ def stats(
         console.print(f"  {started}  {prov:8s}  {secs/60:5.1f} min  ${cost:.4f}  [{reason}]")
 
 
+@app.command()
+def doctor() -> None:
+    """End-to-end sanity check — clés API, vault, mic, NocoDB, claude CLI.
+
+    Run this when something feels off OR on a fresh install before the
+    first `talk` to catch missing pieces before they bite mid-session.
+    """
+    import shutil
+    import subprocess as _sp
+    from pathlib import Path
+
+    ok = "[green]✓[/green]"
+    fail = "[red]✗[/red]"
+    warn = "[yellow]⚠[/yellow]"
+    checks: list[tuple[str, str, str]] = []  # (label, status, detail)
+
+    # 1. Secrets file + API keys
+    try:
+        cfg = load_config()
+        if cfg.has_gemini:
+            checks.append(("Gemini API key", ok, "loaded"))
+        else:
+            checks.append(("Gemini API key", fail, f"missing in {SECRETS_PATH}"))
+        if cfg.has_openai:
+            checks.append(("OpenAI API key", ok, "loaded"))
+        else:
+            checks.append(("OpenAI API key", warn, "missing (Gemini-only is fine)"))
+        checks.append(("Monthly budget cap", ok, f"${cfg.monthly_budget_usd:.2f}/month"))
+    except FileNotFoundError:
+        checks.append(("Secrets file", fail, f"{SECRETS_PATH} not found"))
+
+    # 2. Vault paths
+    vault = Path.home() / "OBSIDIAN" / "2ND_CERVEAU"
+    if vault.exists():
+        checks.append(("Obsidian vault", ok, str(vault)))
+    else:
+        checks.append(("Obsidian vault", warn, f"{vault} not found — context_loader will return empty"))
+    voice_sessions_dir = vault / "_System" / "voice-sessions"
+    if voice_sessions_dir.exists():
+        n = len(list(voice_sessions_dir.glob("*.md")))
+        checks.append(("Vault voice-sessions/", ok, f"{n} notes"))
+    else:
+        checks.append(("Vault voice-sessions/", warn, "will be created on first session"))
+
+    # 3. CLI dependencies
+    for binary in ["claude", "edge-tts", "afplay"]:
+        path = shutil.which(binary)
+        checks.append((f"Binary `{binary}`", ok if path else fail, path or "not in PATH"))
+
+    # 4. PortAudio / mic access — try to open and close a stream
+    try:
+        import sounddevice as _sd
+        devs = _sd.query_devices()
+        input_devs = [d for d in devs if d.get("max_input_channels", 0) > 0]
+        if input_devs:
+            checks.append(("Microphone (PortAudio)", ok, f"{len(input_devs)} input device(s)"))
+        else:
+            checks.append(("Microphone (PortAudio)", fail, "no input device"))
+    except Exception as exc:
+        checks.append(("Microphone (PortAudio)", fail, repr(exc)))
+
+    # 5. NocoDB reachability (best-effort, opt-in)
+    try:
+        from .nocodb_writer import _config as _nc_config
+        nc = _nc_config()
+        if nc:
+            url, _token, table = nc
+            checks.append(("NocoDB config", ok, f"table {table[-8:]} @ {url}"))
+        else:
+            checks.append(("NocoDB config", warn, "env vars missing in ~/.nocodb.env (mirror disabled)"))
+    except Exception as exc:
+        checks.append(("NocoDB config", warn, repr(exc)))
+
+    # 6. Sessions log directory + recent count
+    from .cost_tracker import SESSIONS_DIR
+    if SESSIONS_DIR.exists():
+        n = len(list(SESSIONS_DIR.glob("*.jsonl")))
+        checks.append(("Sessions log dir", ok, f"{n} jsonl files in {SESSIONS_DIR}"))
+    else:
+        checks.append(("Sessions log dir", warn, "will be created on first session"))
+
+    # 7. Claude Code project dir (sanity for --cli-context)
+    cc_root = Path.home() / ".claude" / "projects"
+    if cc_root.exists():
+        n = sum(1 for _ in cc_root.glob("*/*.jsonl"))
+        checks.append(("Claude Code sessions", ok, f"{n} jsonl across all projects"))
+    else:
+        checks.append(("Claude Code sessions", warn, f"{cc_root} not found"))
+
+    # 8. OpenCode db (sanity for --cli-context multi-source)
+    opencode_db = Path.home() / ".local" / "share" / "opencode" / "opencode.db"
+    if opencode_db.exists():
+        checks.append(("OpenCode db", ok, str(opencode_db)))
+    else:
+        checks.append(("OpenCode db", warn, f"{opencode_db} not found — Claude Code source only"))
+
+    # Render
+    body = "\n".join(f"  {status}  {label:32s} {detail}" for label, status, detail in checks)
+    fails = sum(1 for _, s, _ in checks if s == fail)
+    title = "voice-realtime doctor — ALL GOOD" if fails == 0 else f"voice-realtime doctor — {fails} FAILURE(S)"
+    border = "green" if fails == 0 else "red"
+    console.print(Panel(body, title=title, border_style=border))
+
+
 def main() -> None:
     app()
 
