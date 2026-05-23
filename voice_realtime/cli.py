@@ -521,6 +521,13 @@ async def _run_talk(
                     if text:
                         transcript_user.append(text)
                         console.print(f"[cyan]>>>[/cyan] {text}", end="")
+                        # Voice kill switch — Gemini Live only emits partial_*,
+                        # never final_*. Check killchat keyword on each partial.
+                        if _is_killchat_keyword(text):
+                            logger.info("Voice kill switch — 'killchat' keyword matched: %r", text)
+                            console.print("\n[yellow]Voice kill switch: 'killchat' détecté[/yellow]")
+                            end_reason = "user_voice_killchat"
+                            stop_event.set()
                 elif event.kind == "final_transcript_user":
                     text = event.data.get("text", "")
                     if text and not transcript_user:
