@@ -155,6 +155,52 @@ def compact_with_claude_p(text: str, timeout_seconds: int = 60) -> str | None:
     return out or None
 
 
+def find_git_repo(start: Path | None = None) -> Path | None:
+    """Walk up from `start` (default: cwd) until a `.git` directory is found."""
+    start = start or Path(os.getcwd())
+    for candidate in [start, *start.parents]:
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+def get_recent_git_log(repo: Path | None = None, count: int = 8) -> str | None:
+    """Return `git log -<count> --oneline` for the detected repo, or None.
+
+    Surfaces what actions the CLI session took that don't appear in the
+    user/assistant text turns (tool_use blocks are stripped). The model
+    otherwise has no way to know "we just shipped commit c834367".
+    """
+    repo = repo or find_git_repo()
+    if repo is None:
+        return None
+    try:
+        log_out = subprocess.run(
+            ["git", "-C", str(repo), "log", f"-{count}", "--oneline", "--no-decorate"],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if log_out.returncode != 0:
+        return None
+    log_lines = (log_out.stdout or "").strip()
+    if not log_lines:
+        return None
+    # Also include short status to flag uncommitted in-flight work.
+    try:
+        status_out = subprocess.run(
+            ["git", "-C", str(repo), "status", "--short"],
+            capture_output=True, text=True, timeout=3, check=False,
+        )
+        status = (status_out.stdout or "").strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        status = ""
+    parts = [f"Repo : {repo.name}", "", "Derniers commits :", log_lines]
+    if status:
+        parts.extend(["", "Modifs non commitées :", status])
+    return "\n".join(parts)
+
+
 def build_claude_code_context(
     cwd: Path | None = None,
     compact_threshold: int = COMPACT_THRESHOLD_CHARS,
@@ -162,8 +208,9 @@ def build_claude_code_context(
 ) -> str | None:
     """Public entrypoint — find session, extract text, compact if needed.
 
-    Returns a ready-to-inject block ("## Conversation Claude Code en cours\\n...")
-    or None if no session was found / file empty.
+    Returns a ready-to-inject block or None if no session was found / file empty.
+    Includes a `git log` summary of the current repo so the model sees actions
+    that happened via tool_use (commits, file edits) — not just text turns.
     """
     jsonl_path = find_latest_session_jsonl(cwd)
     if jsonl_path is None:
@@ -176,4 +223,9 @@ def build_claude_code_context(
         body = compacted or raw[:compact_target]
     else:
         body = raw
-    return f"## Conversation Claude Code en cours\n{body}"
+
+    git_block = get_recent_git_log()
+    sections = ["## Conversation Claude Code en cours", body]
+    if git_block:
+        sections += ["", "### État git du repo de travail", git_block]
+    return "\n".join(sections)

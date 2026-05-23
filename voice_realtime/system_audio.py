@@ -89,8 +89,33 @@ def resume_external_media(state: MediaState) -> None:
         _applescript('tell application "Music" to play')
 
 
+class AnotherSessionActive(RuntimeError):
+    """Raised when another voice-realtime talk session holds the lock."""
+
+
 def acquire_lock() -> None:
+    """Acquire the singleton lock. Raises if a live session already holds it.
+
+    The lock file stores the pid of the holder. On entry we check if that pid
+    is alive (kill -0). If yes, refuse to start — two duplex sessions on the
+    same audio device produce the "voix monstre" effect (mixed playback +
+    duelling barge-in flushes). Stale pid → overwrite and continue.
+    """
     VR_DIR.mkdir(parents=True, exist_ok=True)
+    if LOCK_PATH.exists():
+        try:
+            holder_pid = int(LOCK_PATH.read_text(encoding="utf-8").split()[0])
+        except (ValueError, IndexError, OSError):
+            holder_pid = 0
+        if holder_pid > 0 and holder_pid != os.getpid():
+            try:
+                os.kill(holder_pid, 0)  # alive probe — no signal sent
+                raise AnotherSessionActive(
+                    f"Another voice-realtime talk session is already active (pid {holder_pid}). "
+                    f"Say 'killchat' there, or run `kill {holder_pid}` to free the lock."
+                )
+            except ProcessLookupError:
+                pass  # stale — fall through and overwrite
     LOCK_PATH.write_text(f"{os.getpid()} {time.time():.0f}\n", encoding="utf-8")
     # Stop any currently-speaking Jarvis TTS so it doesn't clash with the session.
     for pattern in ("edge-tts.*jarvis", "afplay.*jarvis_", "afplay.*speak-selection", "mpv.*speak-selection"):

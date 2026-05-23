@@ -19,12 +19,19 @@ from pathlib import Path
 # content is "killchat" (1 or 2 words, optional dash) triggers stop.
 # A sentence like "Tu peux killchat ta mère" must NOT match. Tested patterns :
 #  match    : "killchat", "Kill chat.", " kill-chat ! ", "KILL CHAT"
+#  match    : "<noise> Kill chat. <noise>" (Gemini STT diarization markers stripped)
 #  no match : "Tu peux killchat", "killchat ça", "kill chat ta mère"
 _KILLCHAT_RE = re.compile(r"^\s*[.,!?]*\s*kill[\s-]*chat\s*[.,!?]*\s*$", re.IGNORECASE)
+# Gemini Live emits inline diarization tags around speech. Strip them so the
+# strict isolation regex above still matches when the user said only "killchat".
+_STT_NOISE_TAGS_RE = re.compile(r"<(?:noise|silence|music|cough|laugh|background)>", re.IGNORECASE)
 
 
 def _is_killchat_keyword(text: str) -> bool:
-    return bool(_KILLCHAT_RE.match(text or ""))
+    if not text:
+        return False
+    cleaned = _STT_NOISE_TAGS_RE.sub("", text)
+    return bool(_KILLCHAT_RE.match(cleaned))
 
 
 def _say_farewell_edge_tts() -> None:
@@ -71,6 +78,7 @@ from .providers.openai_realtime import (
 )
 from .session_saver import save_session_note
 from .system_audio import (
+    AnotherSessionActive,
     acquire_lock,
     drain_jarvis_queue,
     pause_external_media,
@@ -512,8 +520,13 @@ async def _run_talk(
 
     # Pause external media + acquire Jarvis TTS lock BEFORE opening the
     # microphone — anything still playing would pollute the input stream.
+    # acquire_lock() refuses if another talk session is already active.
+    try:
+        acquire_lock()
+    except AnotherSessionActive as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise SystemExit(2)
     media_state = pause_external_media()
-    acquire_lock()
     if media_state.deezer_pids or media_state.spotify_was_playing or media_state.music_was_playing:
         paused = []
         if media_state.deezer_pids:
