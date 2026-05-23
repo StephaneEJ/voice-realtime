@@ -27,6 +27,10 @@ class ProviderConfig:
     voice: str | None = None
     thinking_level: ThinkingLevel | None = None
     context_tokens: int = 3000
+    # Optional override of the mic sample rate sent to the server. Useful for
+    # testing whether Gemini Live STT improves at 24kHz vs the default 16kHz
+    # on French rapid speech. None = use provider's default constant.
+    input_sample_rate: int | None = None
 
 
 @dataclass(frozen=True)

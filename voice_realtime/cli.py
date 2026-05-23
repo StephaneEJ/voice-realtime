@@ -410,6 +410,11 @@ def talk(
         "--recap-turns",  # legacy alias from the buggy turn-based trigger
         help="Trigger a rolling recap after this many cumulative user transcript chars (default 2500 ≈ 3-4 min of conversation). Char-based instead of turn-based because Gemini emits one partial per syllable.",
     ),
+    mic_rate: int = typer.Option(
+        0,
+        "--mic-rate",
+        help="Override mic sample rate (Hz). 0 = provider default (Gemini 16000, OpenAI 24000). Try 24000 on Gemini to see if FR STT improves on rapid speech.",
+    ),
 ) -> None:
     """M2-M4: duplex audio session with context injection, cost tracking, vault save."""
     try:
@@ -477,6 +482,7 @@ def talk(
             rolling_recap=rolling_recap,
             recap_interval=recap_interval,
             recap_user_chars=recap_user_chars,
+            mic_rate_override=mic_rate or None,
         )
     )
 
@@ -498,6 +504,7 @@ async def _run_talk(
     rolling_recap: bool = True,
     recap_interval: float = 420.0,
     recap_user_chars: int = 2500,
+    mic_rate_override: int | None = None,
 ) -> None:
     # Lazy import audio to avoid PortAudio errors at module load
     from .audio.microphone import MicrophoneStream
@@ -520,17 +527,21 @@ async def _run_talk(
         if (not clean_terminal) or force:
             console.print(Panel(text, title=title, border_style=border_style))
 
-    # Sample rates per provider
+    # Sample rates per provider — overridable via --mic-rate to A/B test
+    # whether 24kHz capture+upload improves Gemini FR STT on rapid speech.
     if provider_name == "openai":
-        input_rate = OPENAI_AUDIO_SAMPLE_RATE
+        input_rate = mic_rate_override or OPENAI_AUDIO_SAMPLE_RATE
         output_rate = OPENAI_AUDIO_SAMPLE_RATE
         impl = OpenAIRealtimeProvider()
     else:
-        input_rate = GEMINI_INPUT_SAMPLE_RATE
+        input_rate = mic_rate_override or GEMINI_INPUT_SAMPLE_RATE
         output_rate = GEMINI_OUTPUT_SAMPLE_RATE
         impl = GeminiProvider()  # type: ignore[assignment]
 
-    pcfg = ProviderConfig(model=model, api_key=api_key, thinking_level="low", voice=voice)
+    pcfg = ProviderConfig(
+        model=model, api_key=api_key, thinking_level="low", voice=voice,
+        input_sample_rate=input_rate,
+    )
 
     if log_path is not None:
         _info(f"Log file: {log_path}")
@@ -667,10 +678,17 @@ async def _run_talk(
     # model_interrupted round-trip (~600ms + buffer ~1-6s on Gemini).
     BARGE_IN_LEVEL = 0.03  # RMS threshold; lowered from 0.08 — AirPods capture peaks ~0.04-0.06
     BARGE_IN_MIN_BUFFER = 4800  # 0.1s of audio @ 24kHz/16bit/mono — guards false positives during model silence
+    # Hysteresis: require N consecutive frames above threshold before flushing.
+    # Mic chunks land every ~200ms; 2 frames ≈ 400ms of sustained signal —
+    # filters out ambient parasites (door, breath, family noise) that hit one
+    # frame's RMS but vanish next frame. Live test 23/05 saw 12 flushes in
+    # 10 min ; with N=2 most of those single-spike parasites get filtered.
+    BARGE_IN_CONSECUTIVE_FRAMES = 2
     _last_level_log = 0.0  # throttle telemetry
+    _above_threshold_streak = 0  # hysteresis counter
 
     async def _mic_pump() -> None:
-        nonlocal _last_level_log
+        nonlocal _last_level_log, _above_threshold_streak
         async with mic_stream as mic:
             async for chunk in mic:
                 if stop_event.is_set():
@@ -687,15 +705,32 @@ async def _run_talk(
                 lvl = mic_stream.level
                 now = asyncio.get_running_loop().time()
                 if buf > BARGE_IN_MIN_BUFFER and (now - _last_level_log) > 0.5:
-                    logger.info("barge-in telemetry — mic_level=%.4f buf=%d", lvl, buf)
+                    logger.info(
+                        "barge-in telemetry — mic_level=%.4f buf=%d streak=%d",
+                        lvl, buf, _above_threshold_streak,
+                    )
                     _last_level_log = now
-                # Client-side barge-in: preempt server-side VAD detection.
+                # Client-side barge-in with hysteresis: only flush after
+                # BARGE_IN_CONSECUTIVE_FRAMES frames above threshold in a row.
                 if lvl > BARGE_IN_LEVEL and buf > BARGE_IN_MIN_BUFFER:
-                    latency.on_interrupt_signal()
-                    discarded = player.flush()
-                    latency.on_flush_complete()
-                    if discarded > 0:
-                        logger.info("client barge-in — flushed %d audio bytes (mic level %.4f)", discarded, lvl)
+                    _above_threshold_streak += 1
+                    if _above_threshold_streak >= BARGE_IN_CONSECUTIVE_FRAMES:
+                        latency.on_interrupt_signal()
+                        discarded = player.flush()
+                        latency.on_flush_complete()
+                        _above_threshold_streak = 0  # reset after firing
+                        if discarded > 0:
+                            logger.info(
+                                "client barge-in — flushed %d audio bytes (mic level %.4f)",
+                                discarded, lvl,
+                            )
+                            # Visual marker: shows the user WHY model audio
+                            # just cut off (otherwise looks like a crash).
+                            console.print(
+                                f"[magenta]✂[/magenta] [dim]barge-in — {discarded}B flushed[/dim]"
+                            )
+                else:
+                    _above_threshold_streak = 0  # any quiet frame resets streak
 
     async def _vu_pump() -> None:
         while not stop_event.is_set():
@@ -850,13 +885,28 @@ async def _run_talk(
     # pump. mic_pump's send_audio_chunk stream keeps the websocket alive — if
     # we cancel pumps first, Gemini server can close the connection with
     # 1011 "Internal error" before our send_text trigger lands.
+    #
+    # Settle window: when killchat triggers stop_event mid-utterance, Gemini's
+    # server is often still generating audio for whatever the user just said.
+    # Sending the farewell on top of that in-flight turn produces the 1011
+    # "Internal error" seen in the 23/05 sessions. 800ms pause lets the
+    # current turn settle before we redirect with a fresh request.
     farewell_via_model = False
     try:
+        logger.info("farewell: settle window 800ms before send_text")
+        await asyncio.sleep(0.8)
         player.flush()  # cut pending model audio so farewell starts on silence
+        logger.info("farewell: sending farewell text")
         await impl.send_text("Dis exactement « Fin voice realtime. » et absolument rien d'autre. Pas de commentaire, pas de question, juste cette phrase.")
+        logger.info("farewell: waiting 3.5s for model audio")
         # Give the model time to generate + recv_pump time to enqueue PCM.
         await asyncio.sleep(3.5)
         farewell_via_model = player.buffered_bytes() > 0
+        logger.info(
+            "farewell: model path %s (buffered=%dB)",
+            "OK" if farewell_via_model else "FAILED",
+            player.buffered_bytes(),
+        )
     except Exception as exc:
         logger.warning("Model farewell failed: %r", exc)
 
@@ -901,7 +951,30 @@ async def _run_talk(
         f"Fin : {end_reason}"
     )
     _panel(summary_text, title="Session terminée", border_style="green")
-    cost_path = tracker.persist(reason=end_reason)
+
+    # Save vault note FIRST so we can include its path in the NocoDB record.
+    vault_note_path: str | None = None
+    if save_note:
+        try:
+            _vault_note_path = save_session_note(
+                transcript_user=transcript_user,
+                transcript_model=transcript_model,
+                provider=provider_name,
+                model=model,
+                elapsed_seconds=tracker.elapsed_seconds,
+                estimated_cost_usd=tracker.estimated_cost_usd,
+                project_hint=project_hint,
+                end_reason=end_reason,
+            )
+            vault_note_path = str(_vault_note_path)
+        except Exception as exc:
+            logger.warning("Vault session note save failed: %r", exc)
+
+    cost_path = tracker.persist(
+        reason=end_reason,
+        project_hint=project_hint,
+        vault_note_path=vault_note_path,
+    )
     _info(f"Cost log: {cost_path}")
 
     # Budget alert : ping Telegram once per month if we crossed 80% of the cap.
@@ -914,18 +987,9 @@ async def _run_talk(
     except Exception as exc:
         logger.warning("Budget alert check failed (non-fatal): %r", exc)
 
-    if save_note:
+    if save_note and vault_note_path is not None:
         try:
-            note_path = save_session_note(
-                transcript_user=transcript_user,
-                transcript_model=transcript_model,
-                provider=provider_name,
-                model=model,
-                elapsed_seconds=tracker.elapsed_seconds,
-                estimated_cost_usd=tracker.estimated_cost_usd,
-                project_hint=project_hint,
-                end_reason=end_reason,
-            )
+            note_path = vault_note_path  # already computed above
             _info(f"Vault session note: {note_path}")
 
             # Auto-summarize via `claude -p` Sonnet — appends synthesis to project note.
@@ -933,7 +997,7 @@ async def _run_talk(
                 _info("Auto-summarize en cours (claude -p Sonnet)...", force=True)
                 try:
                     from .summarizer import summarize_session
-                    result = summarize_session(note_path, project_hint=project_hint)
+                    result = summarize_session(Path(note_path), project_hint=project_hint)
                     head = (
                         f"Sujet : {result.topic_summary[:80]}\n"
                         f"Décisions : {len(result.decisions)}  |  "

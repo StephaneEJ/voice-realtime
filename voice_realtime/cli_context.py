@@ -269,6 +269,16 @@ def detect_source(cwd: Path | None = None) -> tuple[ConversationSource, object] 
     return src, handle
 
 
+def _quiet_subprocess_env() -> dict[str, str]:
+    """Mirror of rolling_recap._quiet_subprocess_env — silences macOS
+    MallocStackLogging warnings leaking from claude -p grand-children.
+    """
+    env = dict(os.environ)
+    env["MallocStackLogging"] = "0"
+    env["MallocStackLoggingNoCompact"] = "0"
+    return env
+
+
 def compact_with_claude_p(text: str, timeout_seconds: int = 60) -> str | None:
     """Use `claude -p` Sonnet to compact a long transcript. Returns None on failure."""
     if not text.strip():
@@ -278,6 +288,8 @@ def compact_with_claude_p(text: str, timeout_seconds: int = 60) -> str | None:
         result = subprocess.run(
             ["claude", "-p", "--model", "sonnet", prompt],
             capture_output=True, text=True, timeout=timeout_seconds, check=False,
+            env=_quiet_subprocess_env(),
+            start_new_session=True,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None

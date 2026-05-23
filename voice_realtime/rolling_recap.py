@@ -15,6 +15,7 @@ context window or attention drifts away from the early discussion.
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -90,6 +91,18 @@ class RecapState:
         self.recap_count += 1
 
 
+def _quiet_subprocess_env() -> dict[str, str]:
+    """Env that suppresses macOS MallocStackLogging warnings leaking from
+    `claude -p` grand-children (Node helpers, Python MCP servers) into our
+    terminal output. Observed live 23/05 session: 4+ warnings polluted the
+    user-facing transcript.
+    """
+    env = dict(os.environ)
+    env["MallocStackLogging"] = "0"
+    env["MallocStackLoggingNoCompact"] = "0"
+    return env
+
+
 def compact_recap(transcript: str, timeout_seconds: int = 45) -> str | None:
     """Run `claude -p` Sonnet to compact a rolling-window transcript."""
     if len(transcript) < MIN_TRANSCRIPT_CHARS:
@@ -99,6 +112,8 @@ def compact_recap(transcript: str, timeout_seconds: int = 45) -> str | None:
         result = subprocess.run(
             ["claude", "-p", "--model", "sonnet", prompt],
             capture_output=True, text=True, timeout=timeout_seconds, check=False,
+            env=_quiet_subprocess_env(),
+            start_new_session=True,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None

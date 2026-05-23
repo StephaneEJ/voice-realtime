@@ -74,7 +74,19 @@ class CostTracker:
             return True, f"max duration {self.max_duration_seconds:.0f}s reached"
         return False, ""
 
-    def persist(self, transcript: str = "", reason: str = "ended") -> Path:
+    def persist(
+        self,
+        transcript: str = "",
+        reason: str = "ended",
+        project_hint: str | None = None,
+        vault_note_path: str | None = None,
+    ) -> Path:
+        """Write the session record to local jsonl + best-effort to NocoDB.
+
+        jsonl stays the source of truth (always writes, no external deps).
+        NocoDB is opt-in via ~/.nocodb.env: success makes the row show up in
+        the dashboard-perso /voice tab; failure is logged and swallowed.
+        """
         ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         path = SESSIONS_DIR / f"{ts}_{self.provider}.jsonl"
         record = {
@@ -90,6 +102,17 @@ class CostTracker:
         }
         with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+        # Best-effort NocoDB mirror — never crashes the caller.
+        try:
+            from .nocodb_writer import insert_session, session_record_from_tracker
+            nc_record = session_record_from_tracker(
+                record, project_hint=project_hint, vault_note_path=vault_note_path,
+            )
+            insert_session(nc_record)
+        except Exception:
+            pass
+
         return path
 
 

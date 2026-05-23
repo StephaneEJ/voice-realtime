@@ -253,8 +253,13 @@ class GeminiProvider:
         if session is None:
             return
         try:
+            rate = (
+                self._provider_config.input_sample_rate
+                if self._provider_config and self._provider_config.input_sample_rate
+                else GEMINI_INPUT_SAMPLE_RATE
+            )
             await session.send_realtime_input(
-                audio={"data": pcm16, "mime_type": f"audio/pcm;rate={GEMINI_INPUT_SAMPLE_RATE}"}
+                audio={"data": pcm16, "mime_type": f"audio/pcm;rate={rate}"}
             )
         except Exception as exc:
             _dbg(f"send_audio_chunk exception (continuing, reconnect loop will recover): {exc!r}")

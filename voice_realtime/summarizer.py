@@ -94,11 +94,17 @@ def _build_prompt(user_blob: str, model_blob: str, project_hint: str | None) -> 
 
 def _call_claude(prompt: str, model: str) -> str:
     """Invoke `claude -p` CLI and capture stdout. Returns raw text."""
+    import os as _os
+    quiet_env = dict(_os.environ)
+    quiet_env["MallocStackLogging"] = "0"
+    quiet_env["MallocStackLoggingNoCompact"] = "0"
     result = subprocess.run(
         [CLAUDE_BIN, "-p", "--model", model, prompt],
         capture_output=True,
         text=True,
         timeout=120,
+        env=quiet_env,
+        start_new_session=True,
     )
     if result.returncode != 0:
         # `claude` may write errors to stdout under --output-format json — check both.
