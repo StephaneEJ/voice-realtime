@@ -9,10 +9,41 @@ Commands:
 from __future__ import annotations
 
 import asyncio
+import re
 import signal
 import sys
 import warnings
 from pathlib import Path
+
+# Voice kill switch : strict isolation — only an utterance whose ENTIRE
+# content is "killchat" (1 or 2 words, optional dash) triggers stop.
+# A sentence like "Tu peux killchat ta mère" must NOT match. Tested patterns :
+#  match    : "killchat", "Kill chat.", " kill-chat ! ", "KILL CHAT"
+#  no match : "Tu peux killchat", "killchat ça", "kill chat ta mère"
+_KILLCHAT_RE = re.compile(r"^\s*[.,!?]*\s*kill[\s-]*chat\s*[.,!?]*\s*$", re.IGNORECASE)
+
+
+def _is_killchat_keyword(text: str) -> bool:
+    return bool(_KILLCHAT_RE.match(text or ""))
+
+
+def _say_farewell_edge_tts() -> None:
+    """Local fallback farewell when the model voice path failed.
+
+    Uses Edge TTS (same engine as Jarvis) so the user always gets a clear
+    closing cue, regardless of whether the realtime websocket survived.
+    """
+    import subprocess as sp
+    tmp = "/tmp/voice-realtime-farewell.mp3"
+    try:
+        sp.run(
+            ["edge-tts", "--voice", "fr-FR-HenriNeural", "--rate", "+25%",
+             "--text", "Fin voice realtime.", "--write-media", tmp],
+            capture_output=True, timeout=8,
+        )
+        sp.Popen(["afplay", tmp], stdout=sp.DEVNULL, stderr=sp.DEVNULL).wait(timeout=8)
+    except Exception:
+        pass
 
 # Suppress google-genai SDK chatty warnings about non-text/non-data parts —
 # these fire on every audio response when modality=AUDIO + output_audio_transcription
@@ -209,12 +240,12 @@ def talk(
         "Tu réponds en français, naturellement, comme une conversation. "
         "Tu n'es ni flatteur ni servile. Tu challenges quand c'est utile. "
         "Tu vas droit au but, sans préambule.\n\n"
-        "OUVERTURE OBLIGATOIRE : Dès que la session démarre, ta TOUTE PREMIÈRE action "
-        "est de dire à voix haute exactement : « Salut Stéphane, je suis connecté, je "
-        "t'écoute. » Tu dis cette phrase IMMÉDIATEMENT, sans attendre. C'est ta phrase "
-        "d'ouverture obligatoire, qu'il y ait ou non du contexte vault. Une fois cette "
-        "phrase prononcée, tu attends qu'il prenne la parole pour la suite — tu "
-        "n'enchaînes JAMAIS spontanément sur le contenu du contexte vault."
+        "OUVERTURE OBLIGATOIRE : Quand tu reçois le mot-clé « Démarre. » comme premier "
+        "message (signal de démarrage de session, ce n'est PAS une vraie question de "
+        "Stéphane), tu réponds UNIQUEMENT et EXCLUSIVEMENT par cette phrase courte : "
+        "« Salut Stéphane, je suis connecté, je t'écoute. » — RIEN d'autre. Pas de "
+        "récap projet, pas de Phase 2, pas de questions, pas de proposition. Tu dis "
+        "juste cette phrase puis tu te tais et tu attends sa première vraie question."
     )
     ctx = build_context(project_hint=project or None)
     if ctx:
@@ -325,6 +356,14 @@ async def _run_talk(
         release_lock()
         resume_external_media(media_state)
         return
+
+    # Greeting kick : Gemini Live native-audio server VAD won't emit a first
+    # turn until it detects user speech. We send a tiny text trigger so the
+    # model delivers the obligatory greeting immediately, without waiting.
+    try:
+        await impl.send_text("Démarre.")
+    except Exception as exc:
+        logger.warning("greeting kick failed (non-fatal): %r", exc)
 
     tracker = CostTracker(
         provider=provider_name,
@@ -487,6 +526,12 @@ async def _run_talk(
                     if text and not transcript_user:
                         transcript_user.append(text)
                         console.print(f"[cyan]>>>[/cyan] {text}")
+                    # Voice kill switch : the isolated word "killchat" stops the session.
+                    if text and _is_killchat_keyword(text):
+                        logger.info("Voice kill switch — 'killchat' keyword matched: %r", text)
+                        console.print("[yellow]Voice kill switch: 'killchat' détecté — fin de session[/yellow]")
+                        end_reason = "user_voice_killchat"
+                        stop_event.set()
                 elif event.kind == "model_interrupted":
                     # User broke in. Drop any audio already buffered so the model
                     # stops talking immediately rather than continuing for seconds.
@@ -532,13 +577,34 @@ async def _run_talk(
 
     await stop_event.wait()
 
-    for task in (mic_task, recv_task, cost_task, vu_task):
-        task.cancel()
+    # Farewell : ask the model to say a closing phrase BEFORE cancelling any
+    # pump. mic_pump's send_audio_chunk stream keeps the websocket alive — if
+    # we cancel pumps first, Gemini server can close the connection with
+    # 1011 "Internal error" before our send_text trigger lands.
+    farewell_via_model = False
+    try:
+        player.flush()  # cut pending model audio so farewell starts on silence
+        await impl.send_text("Dis exactement « Fin voice realtime. » et absolument rien d'autre. Pas de commentaire, pas de question, juste cette phrase.")
+        # Give the model time to generate + recv_pump time to enqueue PCM.
+        await asyncio.sleep(3.5)
+        farewell_via_model = player.buffered_bytes() > 0
+    except Exception as exc:
+        logger.warning("Model farewell failed: %r", exc)
+
+    # Now cancel everything
+    mic_task.cancel()
+    recv_task.cancel()
+    cost_task.cancel()
+    vu_task.cancel()
     await asyncio.gather(mic_task, recv_task, cost_task, vu_task, return_exceptions=True)
 
+    await player.drain(timeout=5.0)
     await impl.close()
-    await player.drain(timeout=2.0)
     player.stop()
+
+    if not farewell_via_model:
+        # Fallback: speak via Edge TTS locally so user always gets a closing cue.
+        _say_farewell_edge_tts()
     try:
         live.stop()
     except Exception:
