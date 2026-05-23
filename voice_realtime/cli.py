@@ -22,7 +22,9 @@ warnings.filterwarnings("ignore", message=".*non-data parts.*")
 
 import typer
 from rich.console import Console
+from rich.live import Live
 from rich.panel import Panel
+from rich.text import Text
 
 from .config import SECRETS_PATH, load_config
 from .context_loader import build_context
@@ -198,7 +200,13 @@ def talk(
         "Tu es Jarvis voice — un partenaire de brainstorming pour Stéphane Dufresne. "
         "Tu réponds en français, naturellement, comme une conversation. "
         "Tu n'es ni flatteur ni servile. Tu challenges quand c'est utile. "
-        "Tu vas droit au but, sans préambule."
+        "Tu vas droit au but, sans préambule.\n\n"
+        "OUVERTURE OBLIGATOIRE : Dès que la session démarre, ta TOUTE PREMIÈRE action "
+        "est de dire à voix haute exactement : « Salut Stéphane, je suis connecté, je "
+        "t'écoute. » Tu dis cette phrase IMMÉDIATEMENT, sans attendre. C'est ta phrase "
+        "d'ouverture obligatoire, qu'il y ait ou non du contexte vault. Une fois cette "
+        "phrase prononcée, tu attends qu'il prenne la parole pour la suite — tu "
+        "n'enchaînes JAMAIS spontanément sur le contenu du contexte vault."
     )
     ctx = build_context(project_hint=project or None)
     if ctx:
@@ -303,11 +311,43 @@ async def _run_talk(
 
     player = AudioPlayer(rate=output_rate)
     player.start()
+    mic_stream = MicrophoneStream(rate=input_rate, chunk_ms=200)
 
     transcript_user: list[str] = []
     transcript_model: list[str] = []
     stop_event = asyncio.Event()
     end_reason = "user_stop"
+    connected = True  # impl.connect() has returned successfully above
+
+    def _vu_bar(level: float, width: int = 28) -> str:
+        scaled = min(1.0, level * 4.5)  # speech RMS ~0.05-0.2 maps to 0.2-0.9 bar
+        filled = int(scaled * width)
+        return "█" * filled + "░" * (width - filled)
+
+    def _render_status() -> Panel:
+        if connected:
+            head = f"[green]●[/green] Connecté  [dim]{provider_name} / {model}[/dim]"
+            border = "green"
+        else:
+            head = f"[yellow]○[/yellow] Connexion...  [dim]{provider_name} / {model}[/dim]"
+            border = "yellow"
+        mic_lvl = mic_stream.level
+        out_lvl = player.level
+        body = (
+            f"{head}\n"
+            f"🎤 TOI  [cyan]{_vu_bar(mic_lvl)}[/cyan]  [dim]{mic_lvl*100:4.1f}[/dim]\n"
+            f"🔊 IA   [magenta]{_vu_bar(out_lvl)}[/magenta]  [dim]{out_lvl*100:4.1f}[/dim]"
+        )
+        return Panel(Text.from_markup(body), border_style=border, title="voice-realtime live")
+
+    live = Live(
+        _render_status(),
+        console=console,
+        refresh_per_second=15,
+        transient=False,
+        auto_refresh=False,
+    )
+    live.start()
 
     def _request_stop(_sig=None, _frame=None) -> None:
         if not stop_event.is_set():
@@ -324,7 +364,7 @@ async def _run_talk(
             pass
 
     async def _mic_pump() -> None:
-        async with MicrophoneStream(rate=input_rate, chunk_ms=200) as mic:
+        async with mic_stream as mic:
             async for chunk in mic:
                 if stop_event.is_set():
                     return
@@ -334,6 +374,14 @@ async def _run_talk(
                     logger.exception("send_audio_chunk failed")
                     console.print(f"[red]send_audio_chunk failed: {exc!r}[/red]")
                     return
+
+    async def _vu_pump() -> None:
+        while not stop_event.is_set():
+            try:
+                live.update(_render_status(), refresh=True)
+            except Exception:
+                pass
+            await asyncio.sleep(0.07)
 
     # Bug #1 fix : avoid showing partial model transcripts faster than audio playback.
     # Default = hidden (sync with audio at turn end). --show-partial re-enables streaming.
@@ -414,16 +462,21 @@ async def _run_talk(
     mic_task = asyncio.create_task(_mic_pump())
     recv_task = asyncio.create_task(_recv_pump())
     cost_task = asyncio.create_task(_cost_monitor())
+    vu_task = asyncio.create_task(_vu_pump())
 
     await stop_event.wait()
 
-    for task in (mic_task, recv_task, cost_task):
+    for task in (mic_task, recv_task, cost_task, vu_task):
         task.cancel()
-    await asyncio.gather(mic_task, recv_task, cost_task, return_exceptions=True)
+    await asyncio.gather(mic_task, recv_task, cost_task, vu_task, return_exceptions=True)
 
     await impl.close()
     await player.drain(timeout=2.0)
     player.stop()
+    try:
+        live.stop()
+    except Exception:
+        pass
 
     # Summary + persist
     if not clean_terminal:

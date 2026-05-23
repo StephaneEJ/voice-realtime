@@ -30,6 +30,8 @@ class MicrophoneStream:
         self._stream: sd.InputStream | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._closed: bool = False
+        # VU meter level — 0.0 to 1.0 RMS-normalized, peak-hold with decay.
+        self.level: float = 0.0
 
     async def __aenter__(self) -> "MicrophoneStream":
         self._loop = asyncio.get_running_loop()
@@ -56,6 +58,14 @@ class MicrophoneStream:
         # Called from PortAudio thread. Push bytes to asyncio queue via loop-safe call.
         if self._closed or self._loop is None:
             return
+        # VU level: RMS of this chunk, scaled 0..1. Fast attack, slow decay.
+        if indata.size:
+            arr = indata.astype(np.float32) / 32768.0
+            rms = float(np.sqrt(np.mean(arr * arr)))
+        else:
+            rms = 0.0
+        prev = self.level
+        self.level = rms if rms > prev else (prev * 0.80 + rms * 0.20)
         pcm16_bytes = indata.tobytes()
         try:
             self._loop.call_soon_threadsafe(self._safe_put, pcm16_bytes)

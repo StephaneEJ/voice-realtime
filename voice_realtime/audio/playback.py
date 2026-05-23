@@ -27,6 +27,8 @@ class AudioPlayer:
         self._lock = threading.Lock()
         self._stream: sd.OutputStream | None = None
         self._started: bool = False
+        # VU meter level for the audio being played (model voice). 0.0 to 1.0.
+        self.level: float = 0.0
 
     def start(self) -> None:
         if self._started:
@@ -67,6 +69,11 @@ class AudioPlayer:
                 outdata[:] = np.frombuffer(padded, dtype=np.int16).reshape(frames, self.channels)
             else:
                 outdata.fill(0)
+        # VU level on the samples actually emitted. Fast attack, slow decay.
+        arr = outdata.astype(np.float32) / 32768.0
+        rms = float(np.sqrt(np.mean(arr * arr))) if arr.size else 0.0
+        prev = self.level
+        self.level = rms if rms > prev else (prev * 0.80 + rms * 0.20)
 
     async def enqueue(self, pcm16_bytes: bytes) -> None:
         # No await needed — lock is thread-safe, PortAudio drains in its own thread.
