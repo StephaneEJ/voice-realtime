@@ -6,6 +6,11 @@
 import { useEffect, useState } from "react";
 import { Avatar } from "../components/Avatar";
 import { StatusChip } from "../components/StatusChip";
+import {
+  openPersonaInObsidian,
+  openPersonasFolderInObsidian,
+  openSecretsFile,
+} from "../lib/vault";
 import type { Persona, SettingsSnapshot } from "../lib/models";
 
 export type SettingsTab = "keys" | "models" | "budget" | "personas";
@@ -175,14 +180,32 @@ function KeysTab({ settings }: { settings: SettingsSnapshot }) {
         <code className="mf-mono mf-acc" style={{ fontSize: 11, display: "block", marginTop: 4, wordBreak: "break-all" }}>
           {settings.secretsPath}
         </code>
-        <p className="mf-cap mf-dim" style={{ marginTop: 6 }}>
+        <p className="mf-cap mf-dim" style={{ marginTop: 6, marginBottom: 8 }}>
           Write OPENAI_API_KEY=… and GEMINI_API_KEY=… one per line. Restart the CLI
           to pick up changes.
         </p>
+        <button
+          type="button"
+          onClick={() => openSecretsFile(settings.secretsPath)}
+          style={LINK_BTN}
+        >
+          Open in editor ↗
+        </button>
       </div>
     </div>
   );
 }
+
+const LINK_BTN: React.CSSProperties = {
+  background: "var(--mf-panel-3)",
+  border: "1px solid var(--mf-border-2)",
+  color: "var(--mf-acc)",
+  padding: "6px 10px",
+  borderRadius: 6,
+  fontFamily: "var(--mf-sans)",
+  fontSize: 11,
+  cursor: "pointer",
+};
 
 function KeyRow({ label, present }: { label: string; present: boolean }) {
   return (
@@ -275,7 +298,16 @@ function BudgetTab({ settings }: { settings: SettingsSnapshot }) {
 
 function PersonasTab({ personas }: { personas: Persona[] }) {
   if (personas.length === 0) {
-    return <p className="mf-dim mf-body">Aucune persona — vérifie <code>_System/voice-personas/</code> dans le vault.</p>;
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <p className="mf-dim mf-body">
+          Aucune persona — crée le premier fichier dans <code>_System/voice-personas/</code>.
+        </p>
+        <button type="button" onClick={() => void openPersonasFolderInObsidian()} style={LINK_BTN}>
+          Open folder in Obsidian ↗
+        </button>
+      </div>
+    );
   }
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -299,13 +331,28 @@ function PersonasTab({ personas }: { personas: Persona[] }) {
               {p.description || p.provider || "—"}
             </span>
           </div>
-          <span className="mf-cap mf-mono mf-dim" style={{ fontSize: 10 }}>{p.id}</span>
+          <button
+            type="button"
+            onClick={() => void openPersonaInObsidian(p.id)}
+            title="Edit in Obsidian"
+            style={{
+              ...LINK_BTN,
+              padding: "4px 8px",
+              fontSize: 10,
+            }}
+          >
+            Edit ↗
+          </button>
         </div>
       ))}
-      <p className="mf-cap mf-dim">
-        Edit personas in <code>_System/voice-personas/&lt;slug&gt;.md</code>. Per-file frontmatter
-        controls voice, model, vad, obsidian filter.
-      </p>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+        <p className="mf-cap mf-dim" style={{ margin: 0 }}>
+          Source: <code>_System/voice-personas/</code>
+        </p>
+        <button type="button" onClick={() => void openPersonasFolderInObsidian()} style={LINK_BTN}>
+          New persona ↗
+        </button>
+      </div>
     </div>
   );
 }
