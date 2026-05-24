@@ -24,6 +24,7 @@ import {
   VULevels,
   WSEvent,
 } from "./lib/models";
+import { listPersonaFilesFromVault } from "./lib/personaFile";
 
 import "./styles/midfi.css";
 import "./styles/animations.css";
@@ -192,13 +193,23 @@ function App() {
 
   // Refetch personas when the window regains focus — covers the round-trip
   // from "+ New persona" → user creates+saves in Obsidian → comes back here.
-  useEffect(() => {
-    function onFocus() {
-      clientRef.current?.send({ op: "personas.list" });
-    }
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
+  // Also re-reads from the vault filesystem directly, so the list stays
+  // accurate even when no CLI/WS session is running.
+  const refreshPersonas = useCallback(() => {
+    clientRef.current?.send({ op: "personas.list" });
+    void listPersonaFilesFromVault().then((p) => {
+      // Only adopt the fs result if WS hasn't supplied a list yet (avoid
+      // flickering when both fire near-simultaneously). If WS later comes
+      // back with its own list, the WS payload wins (handled in handleEvent).
+      setPersonas((prev) => (prev.length === 0 ? p : prev));
+    });
   }, []);
+
+  useEffect(() => {
+    refreshPersonas();
+    window.addEventListener("focus", refreshPersonas);
+    return () => window.removeEventListener("focus", refreshPersonas);
+  }, [refreshPersonas]);
 
   const openSettings = useCallback(() => setSettingsOpen(true), []);
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
@@ -266,12 +277,8 @@ function App() {
         fontSize: 13,
         overflow: "hidden",
         position: "relative",
-        borderRadius: 12,
-        border: "1px solid var(--mf-border-2)",
-        boxShadow: "0 16px 50px rgba(0,0,0,0.55), 0 0 0 1px rgba(0,0,0,0.5)",
       }}
     >
-      <DragHandle />
       <StatusBanner state={connState} attempt={reconnectAttempt} />
       <EdgeStateBanners settings={settings} closeReason={closeReason} onOpenSettings={openSettings} />
       {session ? (
@@ -293,29 +300,9 @@ function App() {
         settings={settings}
         personas={personas}
         onRefresh={refreshSettings}
-        onPersonasRefresh={() => clientRef.current?.send({ op: "personas.list" })}
+        onPersonasRefresh={refreshPersonas}
       />
     </div>
-  );
-}
-
-/** Invisible 8px strip at the top of the window. Tauri respects
- *  `data-tauri-drag-region` to let the user drag the borderless window. */
-function DragHandle() {
-  return (
-    <div
-      data-tauri-drag-region
-      style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-        right: 0,
-        height: 8,
-        zIndex: 10,
-        cursor: "grab",
-      }}
-      aria-hidden="true"
-    />
   );
 }
 

@@ -6,8 +6,9 @@
 // editor exposes; advanced fields (obsidian_skills/notes/tools/avatar) are
 // preserved on edit by round-tripping the raw frontmatter map.
 
-import { exists, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { exists, readDir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { homeDir, join } from "@tauri-apps/api/path";
+import type { Persona } from "./models";
 
 export interface PersonaFile {
   slug: string;
@@ -34,6 +35,49 @@ async function personaPath(slug: string): Promise<string> {
 export async function personaExists(slug: string): Promise<boolean> {
   const path = await personaPath(slug);
   return await exists(path);
+}
+
+/** List all persona .md files in the vault — fs-driven so the UI can show
+ *  the welcome list even when the CLI control_server isn't running.
+ *  Returns Persona records shaped to match the WS payload, so the UI can
+ *  treat both sources interchangeably. Errors on individual files are
+ *  swallowed (one bad file shouldn't hide the rest), matching the Python
+ *  list_personas behaviour. */
+export async function listPersonaFilesFromVault(): Promise<Persona[]> {
+  const home = await homeDir();
+  const dir = await join(home, VAULT_REL);
+  if (!(await exists(dir))) return [];
+  let entries;
+  try {
+    entries = await readDir(dir);
+  } catch {
+    return [];
+  }
+  const out: Persona[] = [];
+  for (const entry of entries) {
+    if (!entry.isFile || !entry.name?.endsWith(".md") || entry.name.startsWith("_")) continue;
+    const slug = entry.name.slice(0, -3);
+    try {
+      const file = await readPersonaFile(slug);
+      out.push({
+        id: file.slug,
+        name: file.name,
+        description: file.description,
+        voice: file.voice || null,
+        model: file.model || null,
+        provider: file.provider || null,
+        vad: file.vad || null,
+        avatar: null,
+        hasObsidianFilter:
+          Array.isArray(file.extraFrontmatter.obsidian_skills) &&
+          (file.extraFrontmatter.obsidian_skills as unknown[]).length > 0,
+      });
+    } catch {
+      // skip malformed file
+    }
+  }
+  out.sort((a, b) => a.id.localeCompare(b.id));
+  return out;
 }
 
 /** Tiny YAML serializer for our schema. Quotes strings; lists become flow

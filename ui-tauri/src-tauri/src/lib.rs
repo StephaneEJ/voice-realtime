@@ -5,6 +5,7 @@
 // `icons/32x32.png`) toggles it on click. When shown, the window is
 // positioned near the tray icon so it feels like a popover.
 
+use std::fs::OpenOptions;
 use std::process::{Command, Stdio};
 
 use tauri::{
@@ -31,10 +32,24 @@ const CLI_BIN: &str = "/Users/stephanedufresne/OBSIDIAN/PROJETS DEV/voice-realti
 /// process. Stdout/stderr are swallowed — the UI observes session state
 /// through the WS control server, not the subprocess streams. Returns Ok as
 /// soon as the spawn succeeds (does not wait for the CLI to be ready).
+const CLI_LOG: &str = "/tmp/voice-realtime-cli.log";
+
 #[tauri::command]
 async fn spawn_cli_session(persona: String, max_minutes: Option<f64>) -> Result<(), String> {
     let max = max_minutes.unwrap_or(30.0);
     let max_str = format!("{}", max);
+
+    // Capture child stdout+stderr to a known file so we can read failures
+    // back to the user instead of swallowing them. Truncates on each launch.
+    let log = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(CLI_LOG)
+        .map_err(|e| format!("cannot open log {}: {}", CLI_LOG, e))?;
+    let log_err = log.try_clone()
+        .map_err(|e| format!("cannot clone log handle: {}", e))?;
+
     let result = Command::new(CLI_BIN)
         .args([
             "talk",
@@ -45,13 +60,19 @@ async fn spawn_cli_session(persona: String, max_minutes: Option<f64>) -> Result<
             &max_str,
             "--clean-terminal",
         ])
+        // Inherit the user's full env (HOME, PATH, GOOGLE creds, etc.) —
+        // the CLI loads config from $HOME/.claude/voice-realtime.env and
+        // sounddevice needs DYLD_LIBRARY_PATH on macOS.
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(Stdio::from(log))
+        .stderr(Stdio::from(log_err))
         .spawn();
     match result {
         Ok(_child) => Ok(()),
-        Err(err) => Err(format!("failed to spawn CLI ({}): {}", CLI_BIN, err)),
+        Err(err) => Err(format!(
+            "failed to spawn CLI ({}): {} — check {}",
+            CLI_BIN, err, CLI_LOG,
+        )),
     }
 }
 

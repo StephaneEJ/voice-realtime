@@ -15,10 +15,12 @@ import type { WSCommand, WSEvent } from "./models";
 // macOS App Transport Security blocks ws:// to 127.0.0.1 by default but
 // whitelists "localhost". Both resolve to the same loopback interface but
 // only the hostname form is exempt from ATS. Stick to "localhost" here.
+// macOS App Transport Security blocks ws:// to 127.0.0.1 from WebKit
+// contexts but exempts "localhost". Both resolve to the same loopback
+// interface but only the hostname form is exempt from ATS.
 const DEFAULT_URL = "ws://localhost:7711";
-const MAX_RECONNECT_ATTEMPTS = 8;
 const BASE_BACKOFF_MS = 500;       // attempt 1 waits 500ms
-const MAX_BACKOFF_MS = 8000;       // cap at 8s between attempts
+const MAX_BACKOFF_MS = 8000;       // cap interval at 8s — keep retrying forever
 
 export type ConnectionState =
   | "disconnected"
@@ -61,17 +63,17 @@ export function createVoiceRTClient(url: string = DEFAULT_URL): VoiceRTClient {
   }
 
   function backoffDelay(attempt: number): number {
-    // Exponential: 500ms, 1s, 2s, 4s, 8s, 8s, 8s, 8s
+    // Exponential: 500ms, 1s, 2s, 4s, 8s, then capped at 8s forever
     return Math.min(BASE_BACKOFF_MS * 2 ** attempt, MAX_BACKOFF_MS);
   }
 
   function scheduleReconnect(): void {
     if (!shouldReconnect) return;
-    if (attempts >= MAX_RECONNECT_ATTEMPTS) {
-      setState("failed");
-      return;
-    }
     setState("reconnecting");
+    // Backoff up to MAX_BACKOFF_MS but never give up — the CLI is local,
+    // privacy isn't an issue, and the user expects the UI to reattach as
+    // soon as they launch the CLI again. The `attempt` counter just feeds
+    // the backoff curve.
     const delay = backoffDelay(attempts);
     attempts += 1;
     reconnectTimer = window.setTimeout(() => {

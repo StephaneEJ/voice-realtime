@@ -21,9 +21,11 @@
     "fs:allow-write-text-file",
     "fs:allow-read-text-file",
     "fs:allow-exists",
+    "fs:allow-read-dir",
     {
       "identifier": "fs:scope",
       "allow": [
+        { "path": "$HOME/OBSIDIAN/2ND_CERVEAU/_System/voice-personas" },
         { "path": "$HOME/OBSIDIAN/2ND_CERVEAU/_System/voice-personas/*" }
       ]
     }
