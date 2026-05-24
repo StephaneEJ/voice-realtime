@@ -3,6 +3,26 @@
 **Date** : 2026-05-24 (post-sprint 7 chantiers Phase 3 V2 + 3.F.1 backend WS).
 **État** : voir [[Voice Realtime Skill]] section "Sprint 24/05".
 
+> **PIVOT 2026-05-24 (soir) — SwiftUI abandonné au profit de Tauri.**
+> Raison : install Xcode bloqué (macOS 26 Tahoe upgrade requis, repoussé).
+> Tauri 2 + React-TS supporte macOS 15.5 directement, bundle 10× plus léger
+> qu'Electron. La sous-architecture audio est aussi clarifiée : la CLI garde
+> 100% de l'I/O audio, l'UI est observer/controller via WebSocket.
+> Cette roadmap garde la structure A-G mais le contenu réel livré est en
+> Tauri (voir `ui-tauri/README.md` pour l'état actuel).
+>
+> **Statut Phase 3.F (UI macOS, post-pivot)** :
+> - ✅ Backend `control_server` refactor attach/observe/control (commit e34ce39)
+> - ✅ CLI `talk --ui` wiring (commit 9752134)
+> - ✅ Tauri scaffold + MVP shell (commit b8f86cd)
+> - ✅ Phase A composants partagés (commit 40f302e)
+> - ✅ Phase B Settings modal 4 tabs (commit 72e9268)
+> - ✅ Phase C persona editor via Obsidian URI (commit 31969e5)
+> - ✅ Phase D edge state banners (commit 0aba5c0)
+> - ✅ Phase E menubar tray + popover (commit 1fda551)
+> - ✅ Phase F global mute shortcut + Phase G spawn-CLI (commit b4e17b0)
+> - ⏸ Phase H split overlay — différée (secondaire)
+
 ## Contexte de cette roadmap
 
 Tout le scope Phase 3 V2 hors UX macOS (P0.1 → 3.H) a été livré dans une session unique avec 138 → 150 pytest verts. Reste **3.F — UX macOS native SwiftUI** qui est :
