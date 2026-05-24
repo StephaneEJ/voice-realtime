@@ -270,6 +270,58 @@ async def test_mute_drops_audio(server_port: int, fake_provider: FakeProvider) -
 
 
 @pytest.mark.asyncio
+async def test_personas_list_returns_payload(
+    server_port: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """personas.list returns a list of persona dicts without requiring a session."""
+    from voice_realtime.persona import Persona
+
+    fake = [
+        Persona(slug="jarvis", name="Jarvis", system_prompt="x", description="assistant"),
+        Persona(slug="coach", name="Coach", system_prompt="y", voice="Charon", model="m"),
+    ]
+    monkeypatch.setattr(cs, "list_personas", lambda: fake)
+
+    uri = f"ws://127.0.0.1:{server_port}"
+    async with websockets.connect(uri) as ws:
+        await ws.send(json.dumps({"op": "personas.list"}))
+        msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=2.0))
+        assert msg["ev"] == "personas.list"
+        assert len(msg["personas"]) == 2
+        assert msg["personas"][0]["id"] == "jarvis"
+        assert msg["personas"][0]["name"] == "Jarvis"
+        assert msg["personas"][1]["voice"] == "Charon"
+        # system_prompt body must NOT leak in payload
+        assert "system_prompt" not in msg["personas"][0]
+
+
+@pytest.mark.asyncio
+async def test_personas_list_works_during_active_session(
+    server_port: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """personas.list is queryable even while a session is running on the same connection."""
+    from voice_realtime.persona import Persona
+
+    monkeypatch.setattr(
+        cs, "list_personas",
+        lambda: [Persona(slug="jarvis", name="Jarvis", system_prompt="x")],
+    )
+
+    uri = f"ws://127.0.0.1:{server_port}"
+    async with websockets.connect(uri) as ws:
+        await ws.send(json.dumps({"op": "session.start", "personaId": "jarvis"}))
+        await asyncio.wait_for(ws.recv(), timeout=2.0)  # drain session.opened
+        await ws.send(json.dumps({"op": "personas.list"}))
+        # Drain until personas.list arrives (cost.tick may interleave)
+        for _ in range(10):
+            msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=2.0))
+            if msg["ev"] == "personas.list":
+                assert msg["personas"][0]["id"] == "jarvis"
+                return
+        pytest.fail("personas.list never received")
+
+
+@pytest.mark.asyncio
 async def test_provider_event_forwards_to_client(server_port: int, fake_provider: FakeProvider) -> None:
     """Inject a fake provider event and verify it surfaces over WS."""
     from voice_realtime.providers.base import RealtimeEvent

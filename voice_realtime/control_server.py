@@ -17,11 +17,13 @@ Architecture:
 
 WS message schema (echo of design/README.md, kept here for reference):
 
+→ {"op": "personas.list"}
 → {"op": "session.start", "personaId": "jarvis", "model": "..."}
 → {"op": "audio.frame", "pcm16": "<base64>", "ts": 1234567890}
 → {"op": "mute", "on": true}
 → {"op": "session.stop"}
 
+← {"ev": "personas.list", "personas": [{id, name, description, voice, model, provider, vad, avatar, hasObsidianFilter}]}
 ← {"ev": "session.opened", "sessionId": "...", "model": "...", "voice": "alloy"}
 ← {"ev": "audio.user.frame", "rms": 0.42, "ts": 123}
 ← {"ev": "audio.model.frame", "rms": 0.31, "pcm16": "..."}
@@ -53,7 +55,7 @@ from .config import load_config
 from .cost_tracker import CostTracker
 from .latency_tracker import LatencyTracker
 from .log import get_logger
-from .persona import PersonaError, load_persona_by_slug
+from .persona import Persona, PersonaError, list_personas, load_persona_by_slug
 from .persona_skills import build_persona_knowledge_block
 from .providers.base import ProviderConfig, RealtimeEvent
 from .providers.gemini import (
@@ -105,6 +107,26 @@ def _pcm16_rms(pcm16: bytes) -> float:
 def _provider_for_model(model: str) -> str:
     """Map a model id to its provider name."""
     return "openai" if model.startswith("gpt-") else "gemini"
+
+
+def _persona_to_dict(p: Persona) -> dict[str, Any]:
+    """Serialize a Persona for the personas.list WS payload.
+
+    Drops the full `system_prompt` body — the UI only needs identity + presets
+    to render the welcome popover. The prompt is loaded server-side at
+    session.start time.
+    """
+    return {
+        "id": p.slug,
+        "name": p.name,
+        "description": p.description,
+        "voice": p.voice,
+        "model": p.model,
+        "provider": p.provider,
+        "vad": p.vad,
+        "avatar": p.avatar,
+        "hasObsidianFilter": p.has_obsidian_filter,
+    }
 
 
 # ─── Session ───────────────────────────────────────────────────────────────
@@ -178,7 +200,16 @@ class ControlServer:
                     await ws.send(json.dumps(_err("BAD_JSON", "message is not valid JSON")))
                     continue
                 op = msg.get("op")
-                if op == "session.start":
+                if op == "personas.list":
+                    # Allowed without a session — UI calls this on the welcome popover
+                    # before the user picks one. Errored persona files are skipped
+                    # silently by list_personas.
+                    personas = [_persona_to_dict(p) for p in list_personas()]
+                    await ws.send(json.dumps({
+                        "ev": "personas.list",
+                        "personas": personas,
+                    }, ensure_ascii=False))
+                elif op == "session.start":
                     if session is not None and not session.closed:
                         await ws.send(json.dumps(_err(
                             "SESSION_ACTIVE",
