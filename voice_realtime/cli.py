@@ -973,6 +973,15 @@ async def _run_talk(
     end_reason = "user_stop"
     connected = True  # impl.connect() has returned successfully above
 
+    # Killchat accumulator: Gemini Live emits user transcripts one syllable
+    # per partial event, so single-partial checks against anchored regexes
+    # like ^stop session$ never match — the partials each contain just " stop"
+    # or " session.". We buffer recent user partials into `_killchat_buffer`
+    # and re-test the trimmed accumulated string after every partial. The
+    # buffer is cleared at the start of each new model response so an old
+    # utterance doesn't bleed into the next one.
+    _killchat_buffer = ""
+
     # Rolling recap : tracks turns + transcripts between auto-injected recaps.
     from .rolling_recap import RecapState, maybe_run_recap, TerminalRecapState, maybe_inject_terminal_delta
     recap_state = RecapState() if rolling_recap else None
@@ -1159,7 +1168,7 @@ async def _run_talk(
     turn_streamed = False
 
     async def _recv_pump() -> None:
-        nonlocal end_reason, turn_streamed
+        nonlocal end_reason, turn_streamed, _killchat_buffer
         try:
             async for event in impl.receive_events():
                 if stop_event.is_set():
@@ -1167,6 +1176,10 @@ async def _run_talk(
                 if event.kind == "audio_chunk_out":
                     pcm = event.data.get("pcm16", b"")
                     if pcm:
+                        # Model started responding → user utterance is over,
+                        # clear the killchat partial accumulator so the next
+                        # user utterance starts fresh.
+                        _killchat_buffer = ""
                         latency.on_model_audio_received()
                         await player.enqueue(pcm)
                         if attached is not None:
@@ -1227,13 +1240,29 @@ async def _run_talk(
                                 "text": text,
                                 "final": False,
                             })
-                        # Voice kill switch — Gemini Live only emits partial_*,
-                        # never final_*. Check killchat keyword on each partial.
-                        if _is_killchat_keyword(text):
-                            logger.info("Voice kill switch — 'killchat' keyword matched: %r", text)
-                            console.print("\n[yellow]Voice kill switch: 'killchat' détecté[/yellow]")
+                        # Voice kill switch — Gemini Live emits one short partial
+                        # per syllable, so anchored regexes like ^stop session$
+                        # never match a single partial. Accumulate partials
+                        # since the last model response and re-check on each
+                        # update. The buffer resets when the model starts
+                        # speaking (audio_chunk_out above).
+                        _killchat_buffer += text
+                        if _is_killchat_keyword(_killchat_buffer):
+                            logger.info(
+                                "Voice kill switch — 'killchat' matched on buffer: %r",
+                                _killchat_buffer,
+                            )
+                            console.print(
+                                f"\n[yellow]Voice kill switch détecté : {_killchat_buffer.strip()!r}[/yellow]"
+                            )
                             end_reason = "user_voice_killchat"
                             stop_event.set()
+                        # Cap buffer length so a long single-speaker monologue
+                        # without intervening model responses doesn't grow
+                        # unbounded. 240 chars ≈ 30s of speech, plenty for
+                        # the longest killchat pattern (~25 chars).
+                        elif len(_killchat_buffer) > 240:
+                            _killchat_buffer = _killchat_buffer[-240:]
                 elif event.kind == "final_transcript_user":
                     text = event.data.get("text", "")
                     if text and not transcript_user:
