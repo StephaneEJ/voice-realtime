@@ -117,12 +117,28 @@ export const DEFAULT_SETTINGS: AppSettings = {
   activePersonaId: "jarvis",
 };
 
+// ─── Settings snapshot (read-only) ────────────────────────────────────────
+// Mirrors _build_settings_payload in voice_realtime/control_server.py.
+
+export interface SettingsSnapshot {
+  secretsPath: string;
+  openaiKey: "present" | "absent";
+  geminiKey: "present" | "absent";
+  defaultModelOpenai: string;
+  defaultModelGemini: string;
+  budgetCapUsd: number;
+  monthlyTotalUsd: number;
+  dailyTotalUsd: number;
+  monthlyProgressPct: number;
+}
+
 // ─── WS wire types (events received from control_server) ──────────────────
 // These are the exact shapes emitted by voice_realtime/control_server.py.
 // Discriminated union on `ev` makes the client code exhaustive-checkable.
 
 export type WSEvent =
   | { ev: "personas.list"; personas: Persona[] }
+  | ({ ev: "settings.get" } & SettingsSnapshot)
   | {
       ev: "session.opened";
       sessionId: string;
@@ -153,5 +169,6 @@ export type WSEvent =
 
 export type WSCommand =
   | { op: "personas.list" }
+  | { op: "settings.get" }
   | { op: "mute"; on: boolean }
   | { op: "session.stop" };

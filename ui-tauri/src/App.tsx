@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { StatusBanner } from "./views/StatusBanner";
 import { WelcomeView } from "./views/WelcomeView";
 import { ActiveSessionView, LiveSession } from "./views/ActiveSessionView";
+import { SettingsModal } from "./views/SettingsModal";
 import {
   ConnectionState,
   createVoiceRTClient,
@@ -17,6 +18,7 @@ import {
   Persona,
   pushVULevel,
   SessionMetrics,
+  SettingsSnapshot,
   TranscriptTurn,
   VULevels,
   WSEvent,
@@ -45,11 +47,19 @@ function App() {
   const [metrics, setMetrics] = useState<SessionMetrics>(EMPTY_METRICS);
   const [vu, setVU] = useState<VULevels>(emptyVULevels);
   const [muted, setMuted] = useState(false);
+  const [settings, setSettings] = useState<SettingsSnapshot | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const handleEvent = useCallback((event: WSEvent) => {
     switch (event.ev) {
       case "personas.list":
         setPersonas(event.personas);
+        break;
+      case "settings.get":
+        // Destructure to drop the `ev` discriminator before storing.
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { ev: _ev, ...snapshot } = event;
+        setSettings(snapshot);
         break;
       case "session.opened":
         setSession({
@@ -169,6 +179,25 @@ function App() {
     clientRef.current?.send({ op: "session.stop" });
   }, []);
 
+  const refreshSettings = useCallback(() => {
+    clientRef.current?.send({ op: "settings.get" });
+  }, []);
+
+  const openSettings = useCallback(() => setSettingsOpen(true), []);
+  const closeSettings = useCallback(() => setSettingsOpen(false), []);
+
+  // Keyboard shortcut for opening settings — ⌘, is the macOS convention.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.metaKey && e.key === ",") {
+        e.preventDefault();
+        setSettingsOpen((open) => !open);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   return (
     <div
       style={{
@@ -195,8 +224,15 @@ function App() {
           onStop={requestStop}
         />
       ) : (
-        <WelcomeView personas={personas} closeReason={closeReason} />
+        <WelcomeView personas={personas} closeReason={closeReason} onSettings={openSettings} />
       )}
+      <SettingsModal
+        open={settingsOpen}
+        onClose={closeSettings}
+        settings={settings}
+        personas={personas}
+        onRefresh={refreshSettings}
+      />
     </div>
   );
 }

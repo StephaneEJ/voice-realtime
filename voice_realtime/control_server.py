@@ -95,6 +95,51 @@ def _pcm16_rms(pcm16: bytes) -> float:
     return min(1.0, rms / 32768.0)
 
 
+def _build_settings_payload() -> dict[str, Any]:
+    """Snapshot of the user's voice-realtime config + usage for the UI's
+    Settings modal. Read-only — writes go through `~/.claude/voice-realtime.env`
+    manually for now (Phase B is display-only). Errors degrade gracefully:
+    missing config file → keys reported as absent + default budget.
+    """
+    from .config import SECRETS_PATH, load_config
+    from .cost_tracker import daily_total_usd, monthly_total_usd
+    from .providers.gemini import DEFAULT_MODEL as GEMINI_DEFAULT_MODEL
+    from .providers.openai_realtime import DEFAULT_MODEL as OPENAI_DEFAULT_MODEL
+
+    has_openai = False
+    has_gemini = False
+    budget_cap = 22.0
+    try:
+        cfg = load_config()
+        has_openai = cfg.has_openai
+        has_gemini = cfg.has_gemini
+        budget_cap = cfg.monthly_budget_usd
+    except FileNotFoundError:
+        pass  # surfaces as keys absent + default budget
+
+    try:
+        monthly = monthly_total_usd()
+    except Exception:
+        monthly = 0.0
+    try:
+        daily = daily_total_usd()
+    except Exception:
+        daily = 0.0
+
+    return {
+        "ev": "settings.get",
+        "secretsPath": str(SECRETS_PATH),
+        "openaiKey": "present" if has_openai else "absent",
+        "geminiKey": "present" if has_gemini else "absent",
+        "defaultModelOpenai": OPENAI_DEFAULT_MODEL,
+        "defaultModelGemini": GEMINI_DEFAULT_MODEL,
+        "budgetCapUsd": round(budget_cap, 2),
+        "monthlyTotalUsd": round(monthly, 4),
+        "dailyTotalUsd": round(daily, 4),
+        "monthlyProgressPct": round(min(1.0, monthly / max(0.01, budget_cap)) * 100, 1),
+    }
+
+
 def _persona_to_dict(p: Persona) -> dict[str, Any]:
     """Serialize a Persona for the personas.list WS payload.
 
@@ -299,6 +344,9 @@ class ControlServer:
                 {"ev": "personas.list", "personas": personas},
                 ensure_ascii=False,
             ))
+            return
+        if op == "settings.get":
+            await ws.send(json.dumps(_build_settings_payload(), ensure_ascii=False))
             return
         if op in ("mute", "session.stop"):
             session = self.attached_session

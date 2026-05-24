@@ -14,9 +14,10 @@ import type { Persona } from "../lib/models";
 export interface WelcomeViewProps {
   personas: Persona[];
   closeReason: string | null;
+  onSettings: () => void;
 }
 
-export function WelcomeView({ personas, closeReason }: WelcomeViewProps) {
+export function WelcomeView({ personas, closeReason, onSettings }: WelcomeViewProps) {
   // Auto-select the first persona by default; arrow keys + ⌘N (number) cycle.
   const [selectedIdx, setSelectedIdx] = useState(0);
 
@@ -72,6 +73,26 @@ export function WelcomeView({ personas, closeReason }: WelcomeViewProps) {
           </span>
           <StatusChip variant="idle">idle</StatusChip>
         </div>
+        <button
+          type="button"
+          onClick={onSettings}
+          title="Settings (⌘,)"
+          style={{
+            width: 26,
+            height: 26,
+            borderRadius: 6,
+            background: "var(--mf-panel-3)",
+            border: "1px solid var(--mf-border-2)",
+            color: "var(--mf-dim)",
+            cursor: "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 14,
+          }}
+        >
+          ⚙
+        </button>
       </header>
 
       {closeReason ? (
