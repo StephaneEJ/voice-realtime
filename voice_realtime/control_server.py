@@ -58,7 +58,12 @@ from .persona import Persona, list_personas
 
 logger = get_logger("voice_realtime.control_server")
 
-DEFAULT_HOST = "127.0.0.1"
+# Bind to "localhost" so the OS resolver wires up both ::1 and 127.0.0.1.
+# WebKit (Tauri UI) follows ATS rules that exempt "localhost" from ws:// but
+# block 127.0.0.1 — clients connect via "localhost" which may resolve to
+# either family first depending on the resolver. Binding the server to the
+# string form covers both.
+DEFAULT_HOST = "localhost"
 DEFAULT_PORT = 7711
 
 # A command handler returns either None or an awaitable. Both shapes are

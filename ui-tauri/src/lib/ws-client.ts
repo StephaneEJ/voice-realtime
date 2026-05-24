@@ -12,7 +12,10 @@
 
 import type { WSCommand, WSEvent } from "./models";
 
-const DEFAULT_URL = "ws://127.0.0.1:7711";
+// macOS App Transport Security blocks ws:// to 127.0.0.1 by default but
+// whitelists "localhost". Both resolve to the same loopback interface but
+// only the hostname form is exempt from ATS. Stick to "localhost" here.
+const DEFAULT_URL = "ws://localhost:7711";
 const MAX_RECONNECT_ATTEMPTS = 8;
 const BASE_BACKOFF_MS = 500;       // attempt 1 waits 500ms
 const MAX_BACKOFF_MS = 8000;       // cap at 8s between attempts
@@ -78,6 +81,7 @@ export function createVoiceRTClient(url: string = DEFAULT_URL): VoiceRTClient {
   }
 
   function openSocket(): void {
+    console.log(`[ws-client] connecting to ${url} (attempt ${attempts + 1})`);
     setState("connecting");
     try {
       ws = new WebSocket(url);
@@ -88,6 +92,7 @@ export function createVoiceRTClient(url: string = DEFAULT_URL): VoiceRTClient {
     }
 
     ws.onopen = () => {
+      console.log("[ws-client] socket OPEN");
       attempts = 0;
       setState("connected");
     };
@@ -117,11 +122,11 @@ export function createVoiceRTClient(url: string = DEFAULT_URL): VoiceRTClient {
     };
 
     ws.onerror = (err) => {
-      console.warn("[ws-client] socket error:", err);
-      // onclose follows; reconnect happens there.
+      console.warn("[ws-client] socket ERROR:", err);
     };
 
-    ws.onclose = () => {
+    ws.onclose = (e) => {
+      console.log(`[ws-client] socket CLOSE code=${e.code} reason=${e.reason} clean=${e.wasClean}`);
       ws = null;
       if (shouldReconnect) {
         scheduleReconnect();

@@ -14,10 +14,13 @@ use tauri::{
     AppHandle, Manager,
 };
 
-#[cfg(target_os = "macos")]
-use tauri::ActivationPolicy;
+// #[cfg(target_os = "macos")]
+// use tauri::ActivationPolicy;
 
-const TRAY_ICON_BYTES: &[u8] = include_bytes!("../icons/32x32.png");
+// 128x128 chosen over 32x32 because macOS menubar is ~22pt = 44px @2x
+// Retina; a 32px source ends up rendered at half size (barely visible).
+// The 128px source downscales cleanly to menubar size.
+const TRAY_ICON_BYTES: &[u8] = include_bytes!("../icons/128x128.png");
 
 /// Hardcoded path to the uv-managed CLI venv shim. Resolved at build time
 /// from the project layout: ../voice-realtime/.venv/bin/voice-realtime relative
@@ -58,12 +61,14 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
-            #[cfg(target_os = "macos")]
-            {
-                // Accessory = no dock icon, no menu bar of the app itself.
-                // We live in the system menubar only.
-                app.set_activation_policy(ActivationPolicy::Accessory);
-            }
+            // ActivationPolicy::Accessory disabled while debugging tray
+            // visibility on macOS 15.5 — Sequoia + non-bundled dev binary +
+            // Accessory policy = tray icon installs silently but doesn't
+            // render. Restore once tray works end-to-end.
+            // #[cfg(target_os = "macos")]
+            // {
+            //     app.set_activation_policy(ActivationPolicy::Accessory);
+            // }
 
             // Tray context menu — accessible via right-click.
             let toggle_i = MenuItem::with_id(app, "toggle", "Show / Hide", true, None::<&str>)?;
@@ -71,9 +76,14 @@ pub fn run() {
             let menu = Menu::with_items(app, &[&toggle_i, &quit_i])?;
 
             let tray_icon = Image::from_bytes(TRAY_ICON_BYTES)?;
-            let _tray = TrayIconBuilder::with_id("main-tray")
+            // icon_as_template DISABLED — the bundled 32x32.png is a full-color
+            // Tauri logo, not an alpha-only template. macOS would render nothing
+            // (or a blank slot) when template mode is on with a colored image.
+            // For a proper monochrome menubar icon, replace 32x32.png with an
+            // alpha-only PNG and re-enable .icon_as_template(true).
+            let tray_build = TrayIconBuilder::with_id("main-tray")
                 .icon(tray_icon)
-                .icon_as_template(true) // macOS: render in menubar tint
+                .tooltip("voice-realtime — click to toggle")
                 .menu(&menu)
                 .show_menu_on_left_click(false) // left click = popover toggle
                 .on_menu_event(|app, event| match event.id.as_ref() {
@@ -82,7 +92,6 @@ pub fn run() {
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
-                    // Left click on tray icon → toggle popover near the icon.
                     if let TrayIconEvent::Click {
                         button: MouseButton::Left,
                         button_state: tauri::tray::MouseButtonState::Up,
@@ -92,7 +101,11 @@ pub fn run() {
                         toggle_window(tray.app_handle());
                     }
                 })
-                .build(app)?;
+                .build(app);
+            match tray_build {
+                Ok(_tray) => eprintln!("[voice-realtime] tray icon installed"),
+                Err(err) => eprintln!("[voice-realtime] FAILED to install tray icon: {err}"),
+            }
 
             Ok(())
         })
