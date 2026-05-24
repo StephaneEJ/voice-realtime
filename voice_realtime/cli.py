@@ -155,6 +155,98 @@ def persona_list() -> None:
     console.print(table)
 
 
+@persona_app.command("new")
+def persona_new(
+    slug: str = typer.Argument(..., help="Persona slug (lowercase, alphanumeric + dashes)"),
+    name: str = typer.Option("", "--name", help="Human-readable name (default: titlecased slug)"),
+    description: str = typer.Option("", "--description", help="One-line description"),
+    voice: str = typer.Option("Charon", "--voice", help="Voice for the chosen provider"),
+    provider: str = typer.Option("gemini", "--provider", help="gemini | openai"),
+    vad: str = typer.Option("balanced", "--vad", help="reactive | balanced | patient | very-patient"),
+    creativity: str = typer.Option("balanced", "--creativity", help="precise | balanced | creative | wild"),
+    greeting_mode: str = typer.Option("persona", "--greeting-mode", help="persona | user"),
+    greeting_text: str = typer.Option("", "--greeting-text", help="What the persona says first"),
+    skills: str = typer.Option("", "--skills", help="Comma-separated Obsidian skill slugs"),
+    notes: str = typer.Option("", "--notes", help="Comma-separated Obsidian note glob patterns"),
+    overwrite: bool = typer.Option(False, "--overwrite", help="Replace if persona already exists"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print generated file without saving"),
+) -> None:
+    """Create a new persona. Generates the system prompt via `claude -p` Sonnet."""
+    from .persona_creator import (
+        generate_system_prompt, is_valid_slug, render_persona_file, save_persona,
+        PersonaCreatorError, VALID_GREETING_MODES, VALID_VADS, VALID_CREATIVITIES,
+    )
+    from .persona import get_personas_dir
+
+    slug = slug.strip().lower()
+    if not is_valid_slug(slug):
+        console.print(
+            f"[red]Invalid slug {slug!r} — use lowercase letters, digits, dashes "
+            f"(1-40 chars, must start with letter/digit).[/red]"
+        )
+        raise typer.Exit(1)
+    if vad not in VALID_VADS:
+        console.print(f"[red]Invalid --vad {vad!r}. Use one of: {', '.join(VALID_VADS)}[/red]")
+        raise typer.Exit(1)
+    if creativity not in VALID_CREATIVITIES:
+        console.print(f"[red]Invalid --creativity {creativity!r}. Use one of: {', '.join(VALID_CREATIVITIES)}[/red]")
+        raise typer.Exit(1)
+    if greeting_mode not in VALID_GREETING_MODES:
+        console.print(f"[red]Invalid --greeting-mode {greeting_mode!r}. Use one of: {', '.join(VALID_GREETING_MODES)}[/red]")
+        raise typer.Exit(1)
+    if provider not in ("gemini", "openai"):
+        console.print(f"[red]Invalid --provider {provider!r}. Use 'gemini' or 'openai'.[/red]")
+        raise typer.Exit(1)
+
+    final_name = name or slug.replace("-", " ").title()
+    final_description = description or f"Persona {final_name}"
+
+    skill_list = [s.strip() for s in skills.split(",") if s.strip()] if skills else []
+    note_list = [n.strip() for n in notes.split(",") if n.strip()] if notes else []
+
+    target_path = get_personas_dir() / f"{slug}.md"
+    if target_path.exists() and not overwrite and not dry_run:
+        console.print(f"[red]Persona already exists: {target_path}[/red]")
+        console.print("[dim]Use --overwrite to replace, or pick a different slug.[/dim]")
+        raise typer.Exit(1)
+
+    console.print(f"[dim]Generating system prompt via claude -p Sonnet (timeout 90s)...[/dim]")
+    try:
+        body = generate_system_prompt(final_name, final_description, skill_list)
+    except PersonaCreatorError as exc:
+        console.print(f"[red]Generation failed: {exc}[/red]")
+        raise typer.Exit(1)
+
+    content = render_persona_file(
+        slug=slug,
+        name=final_name,
+        description=final_description,
+        voice=voice,
+        provider=provider,
+        vad=vad,
+        creativity=creativity,
+        greeting_mode=greeting_mode,
+        greeting_text=greeting_text or None,
+        obsidian_skills=skill_list,
+        obsidian_notes=note_list,
+        tools=["get_current_datetime"],
+        body=body,
+    )
+
+    if dry_run:
+        console.print(Panel(content, title=f"Dry run — {slug}.md", border_style="yellow"))
+        return
+
+    try:
+        saved = save_persona(content, slug, overwrite=overwrite)
+    except PersonaCreatorError as exc:
+        console.print(f"[red]Save failed: {exc}[/red]")
+        raise typer.Exit(1)
+    console.print(f"[green]Persona created:[/green] {saved}")
+    console.print(f"[dim]Test with: voice-realtime persona show {slug}[/dim]")
+    console.print(f"[dim]Use with:  voice-realtime talk --persona {slug}[/dim]")
+
+
 @persona_app.command("show")
 def persona_show(slug: str = typer.Argument(..., help="Persona slug")) -> None:
     """Show a persona's frontmatter + system prompt + resolved knowledge block."""
