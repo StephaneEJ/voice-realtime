@@ -15,15 +15,38 @@ import sys
 import warnings
 from pathlib import Path
 
-# Voice kill switch : strict isolation — only an utterance whose ENTIRE
-# content is "killchat" (1 or 2 words, optional dash) triggers stop.
-# A sentence like "Tu peux killchat ta mère" must NOT match. Tested patterns :
-#  match    : "killchat", "Kill chat.", " kill-chat ! ", "KILL CHAT"
-#  match    : "<noise> Kill chat. <noise>" (Gemini STT diarization markers stripped)
-#  no match : "Tu peux killchat", "killchat ça", "kill chat ta mère"
-_KILLCHAT_RE = re.compile(r"^\s*[.,!?]*\s*kill[\s-]*chat\s*[.,!?]*\s*$", re.IGNORECASE)
+# Voice kill switch : strict isolation across multiple keywords. An utterance
+# whose ENTIRE content matches any pattern triggers stop. Mid-phrase mentions
+# never match.
+#
+# Why FR keywords matter (P0.2, 2026-05-24): Gemini STT consistently mishears
+# "killchat" in French utterances. Observed transcripts during the 18-min test
+# session: "kilk", "kik", "kil chat", and even "24". The legacy EN pattern
+# never matched. FR keywords ("termine la session", "fin jarvis", "stop
+# session") survive Gemini STT cleanly because they're real French words.
+#
+# Patterns:
+#  - FR primary: "termine la session" — 3 words, robust against STT mishears
+#  - FR alt:     "fin jarvis"         — short fallback
+#  - EN alt:     "stop session"       — bilingual fallback
+#  - Legacy EN:  "kill chat" variants — kept for backwards-compat
+#  - Misheard:   "kil[a-zé]* chat"    — accepts "kilk chat", "kik chat",
+#                                       "kil chat", "killé chat"
+_KILLCHAT_PATTERNS = (
+    re.compile(r"^\s*[.,!?]*\s*termine\s+la\s+session\s*[.,!?]*\s*$", re.IGNORECASE),
+    re.compile(r"^\s*[.,!?]*\s*fin\s+jarvis\s*[.,!?]*\s*$", re.IGNORECASE),
+    re.compile(r"^\s*[.,!?]*\s*stop\s+session\s*[.,!?]*\s*$", re.IGNORECASE),
+    re.compile(r"^\s*[.,!?]*\s*kill[\s-]*chat\s*[.,!?]*\s*$", re.IGNORECASE),
+    # Misheard tolerance — Gemini STT FR drops or alters consonants of
+    # "killchat". Observed live: "kilk", "kik", "kil", "killé". `ki` + 1-4
+    # any letter chars + space + `chat`. The anchored ^/$ + the required
+    # space-separated `chat` token keeps false positives down ("kilo de chat"
+    # has a " de " between, so it doesn't match).
+    re.compile(r"^\s*[.,!?]*\s*ki[a-zé]{1,4}\s+chat\s*[.,!?]*\s*$", re.IGNORECASE),
+)
 # Gemini Live emits inline diarization tags around speech. Strip them so the
-# strict isolation regex above still matches when the user said only "killchat".
+# strict isolation regexes above still match when the user said only the
+# keyword surrounded by noise markers.
 _STT_NOISE_TAGS_RE = re.compile(r"<(?:noise|silence|music|cough|laugh|background)>", re.IGNORECASE)
 
 
@@ -31,7 +54,7 @@ def _is_killchat_keyword(text: str) -> bool:
     if not text:
         return False
     cleaned = _STT_NOISE_TAGS_RE.sub("", text)
-    return bool(_KILLCHAT_RE.match(cleaned))
+    return any(p.match(cleaned) for p in _KILLCHAT_PATTERNS)
 
 
 def _say_farewell_edge_tts() -> None:
