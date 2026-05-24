@@ -12,6 +12,7 @@ import asyncio
 import re
 import signal
 import sys
+import time
 import warnings
 from pathlib import Path
 
@@ -332,18 +333,23 @@ def serve(
     host: str = typer.Option("127.0.0.1", "--host", help="Host to bind. Default: loopback only."),
     port: int = typer.Option(7711, "--port", help="WS port. Schema imposed by design handoff."),
 ) -> None:
-    """Start the WebSocket control server for the native UI app (Phase 3.F.1).
+    """Start the WebSocket control server standalone (UI dev / smoke test only).
 
-    The native macOS UI connects to ws://127.0.0.1:7711 and exchanges JSON
-    messages following the schema in `design/README.md`. Audio capture and
-    playback live on the UI side; the server forwards PCM16 to the chosen
-    provider (Gemini Live / OpenAI Realtime) and streams events back.
+    POST-PIVOT (2026-05-24): in normal usage you don't call `serve` directly.
+    Instead you launch `voice-realtime talk --ui` which spins up the server
+    in-process and attaches the live audio session to it automatically. The
+    UI then connects to ws://127.0.0.1:7711 to observe + control that session.
 
-    Test manually with websocat:
+    This `serve` command starts the server WITHOUT any attached session, which
+    is only useful for testing personas.list, error envelopes, and reconnect
+    behavior with websocat / wscat. Without an attached session, the UI sees
+    `NO_SESSION` on mute/stop and only `personas.list` works.
+
+    Smoke test:
         voice-realtime serve &
         websocat ws://127.0.0.1:7711
         # then paste:
-        # {"op":"session.start","personaId":"jarvis"}
+        # {"op":"personas.list"}
     """
     from .control_server import run_server
     console.print(f"[cyan]Starting control server on ws://{host}:{port} — Ctrl+C to stop[/cyan]")
@@ -674,6 +680,16 @@ def talk(
         "--terminal-interval",
         help="Seconds between rolling-terminal injections (default 300 = 5 min). Min throttle: actual check runs every interval/4 but only emits when there's >= 600 new chars.",
     ),
+    ui: bool = typer.Option(
+        False,
+        "--ui/--no-ui",
+        help="Expose a WebSocket control server on 127.0.0.1:7711 so a graphical UI (Tauri app) can observe transcripts, metrics, VU levels, and send mute/stop commands. Audio stays in this CLI; the UI is a viewer + controller, not a bridge.",
+    ),
+    ws_port: int = typer.Option(
+        7711,
+        "--ws-port",
+        help="Port for the --ui WebSocket server. Loopback only. Default matches design/README.md.",
+    ),
 ) -> None:
     """M2-M4: duplex audio session with context injection, cost tracking, vault save."""
     try:
@@ -781,6 +797,8 @@ def talk(
             rolling_terminal=rolling_terminal,
             terminal_recap_interval=terminal_interval,
             cli_context_on=cli_context,
+            ui_enabled=ui,
+            ws_port=ws_port,
         )
     )
 
@@ -809,10 +827,13 @@ async def _run_talk(
     rolling_terminal: bool = False,
     terminal_recap_interval: float = 300.0,
     cli_context_on: bool = False,
+    ui_enabled: bool = False,
+    ws_port: int = 7711,
 ) -> None:
     # Lazy import audio to avoid PortAudio errors at module load
     from .audio.microphone import MicrophoneStream
     from .audio.playback import AudioPlayer
+    from .control_server import _pcm16_rms, start_server_task
 
     logger = get_logger("voice_realtime.talk")
 
@@ -896,6 +917,30 @@ async def _run_talk(
         release_lock()
         resume_external_media(media_state)
         return
+
+    # Spin up the control server + attach the live session so a Tauri UI
+    # (or any WS client) can observe transcripts/metrics and send mute/stop.
+    # Audio stays in this process — the UI is a viewer + light controller,
+    # never an audio bridge.
+    control_server_task: asyncio.Task | None = None
+    attached = None
+    muted_flag = {"on": False}  # mutable closure cell for handler ↔ mic_pump
+
+    if ui_enabled:
+        try:
+            ctrl_server, control_server_task = await start_server_task(port=ws_port)
+            attached = await ctrl_server.attach_session(
+                persona_slug=persona_slug or "jarvis",
+                model=model,
+                provider_name=provider_name,
+                voice=voice,
+                vad=vad,
+            )
+            _info(f"Control server live on ws://127.0.0.1:{ws_port} — UI can connect")
+        except OSError as exc:
+            logger.warning("control_server failed to bind port %d: %r — UI disabled", ws_port, exc)
+            console.print(f"[yellow]UI disabled (port {ws_port} unavailable): {exc}[/yellow]")
+            attached = None
 
     # Greeting kick : Gemini Live native-audio server VAD won't emit a first
     # turn until it detects user speech. We send a tiny text trigger so the
@@ -1008,6 +1053,23 @@ async def _run_talk(
         except (NotImplementedError, ValueError):
             pass
 
+    # Register WS command handlers so the UI can mute the mic or stop the
+    # session. Handlers run on the asyncio loop; mute toggles a shared flag
+    # checked by _mic_pump on each chunk; stop sets stop_event the same way
+    # SIGINT / killchat / kill switch do.
+    if attached is not None:
+        def _on_mute(msg: dict) -> None:
+            muted_flag["on"] = bool(msg.get("on"))
+            logger.info("UI mute → %s", muted_flag["on"])
+            asyncio.create_task(attached.emit({"ev": "mute.state", "on": muted_flag["on"]}))
+
+        def _on_ui_stop(_msg: dict) -> None:
+            logger.info("UI requested stop")
+            _request_stop()
+
+        attached.on_command("mute", _on_mute)
+        attached.on_command("session.stop", _on_ui_stop)
+
     # Client-side barge-in: when user starts speaking while model audio is
     # still buffered, flush locally without waiting for server VAD →
     # model_interrupted round-trip (~600ms + buffer ~1-6s on Gemini).
@@ -1028,6 +1090,17 @@ async def _run_talk(
             async for chunk in mic:
                 if stop_event.is_set():
                     return
+                if muted_flag["on"]:
+                    # UI muted the mic — skip provider send. We still pump the
+                    # mic_stream (so .level updates for VU and the audio loop
+                    # stays clean), but no tokens are billed.
+                    if attached is not None:
+                        await attached.emit({
+                            "ev": "audio.user.frame",
+                            "rms": 0.0,
+                            "ts": int(time.time() * 1000),
+                        })
+                    continue
                 try:
                     await impl.send_audio_chunk(chunk)
                     latency.on_user_audio_sent()
@@ -1035,6 +1108,12 @@ async def _run_talk(
                     logger.exception("send_audio_chunk failed")
                     console.print(f"[red]send_audio_chunk failed: {exc!r}[/red]")
                     return
+                if attached is not None:
+                    await attached.emit({
+                        "ev": "audio.user.frame",
+                        "rms": round(_pcm16_rms(chunk), 4),
+                        "ts": int(time.time() * 1000),
+                    })
                 # Telemetry: log mic level when model is mid-speech (helps tune threshold).
                 buf = player.buffered_bytes()
                 lvl = mic_stream.level
@@ -1090,6 +1169,16 @@ async def _run_talk(
                     if pcm:
                         latency.on_model_audio_received()
                         await player.enqueue(pcm)
+                        if attached is not None:
+                            await attached.emit({
+                                "ev": "audio.model.frame",
+                                "rms": round(_pcm16_rms(pcm), 4),
+                                "ts": int(time.time() * 1000),
+                            })
+                            if latency.last_ttfa_ms is not None:
+                                await attached.emit({
+                                    "ev": "ttfa", "ms": round(latency.last_ttfa_ms, 1),
+                                })
                 elif event.kind == "partial_transcript_model":
                     text = event.data.get("text", "")
                     if text:
@@ -1099,6 +1188,13 @@ async def _run_talk(
                         if show_partial:
                             console.print(f"[green]<<<[/green] {text}", end="")
                             turn_streamed = True
+                        if attached is not None:
+                            await attached.emit({
+                                "ev": "transcript.delta",
+                                "role": "model",
+                                "text": text,
+                                "final": False,
+                            })
                 elif event.kind == "final_transcript_model":
                     text = event.data.get("text", "")
                     if text:
@@ -1110,6 +1206,12 @@ async def _run_talk(
                         else:
                             console.print()  # close streamed line on its own newline
                         turn_streamed = False
+                        if attached is not None:
+                            await attached.emit({
+                                "ev": "transcript.final",
+                                "role": "model",
+                                "text": text,
+                            })
                     latency.on_turn_complete()
                 elif event.kind == "partial_transcript_user":
                     text = event.data.get("text", "")
@@ -1118,6 +1220,13 @@ async def _run_talk(
                         if recap_state is not None:
                             recap_state.add_user(text)
                         console.print(f"[cyan]>>>[/cyan] {text}", end="")
+                        if attached is not None:
+                            await attached.emit({
+                                "ev": "transcript.delta",
+                                "role": "user",
+                                "text": text,
+                                "final": False,
+                            })
                         # Voice kill switch — Gemini Live only emits partial_*,
                         # never final_*. Check killchat keyword on each partial.
                         if _is_killchat_keyword(text):
@@ -1132,6 +1241,12 @@ async def _run_talk(
                         if recap_state is not None:
                             recap_state.add_user(text)
                         console.print(f"[cyan]>>>[/cyan] {text}")
+                    if text and attached is not None:
+                        await attached.emit({
+                            "ev": "transcript.final",
+                            "role": "user",
+                            "text": text,
+                        })
                     # Voice kill switch : the isolated word "killchat" stops the session.
                     if text and _is_killchat_keyword(text):
                         logger.info("Voice kill switch — 'killchat' keyword matched: %r", text)
@@ -1146,10 +1261,20 @@ async def _run_talk(
                     latency.on_flush_complete()
                     logger.info("model_interrupted — flushed %d audio bytes", discarded)
                     turn_streamed = False
+                    if attached is not None:
+                        await attached.emit({"ev": "model.interrupted"})
+                        if latency.last_ttfi_ms is not None:
+                            await attached.emit({"ev": "ttfi", "ms": round(latency.last_ttfi_ms, 1)})
                 elif event.kind == "error":
                     logger.error("Server error: %s", event.data)
                     console.print(f"\n[red]Server error: {event.data}[/red]")
                     end_reason = "server_error"
+                    if attached is not None:
+                        await attached.emit({
+                            "ev": "error",
+                            "code": "PROVIDER_ERROR",
+                            "msg": str(event.data.get("exception") or event.data.get("error")),
+                        })
                     stop_event.set()
                     return
                 # session_closed is per-turn end, don't stop the whole session
@@ -1161,8 +1286,19 @@ async def _run_talk(
 
     async def _cost_monitor() -> None:
         nonlocal end_reason
+        prev_total = 0.0
         while not stop_event.is_set():
             await asyncio.sleep(2.0)
+            total = tracker.estimated_cost_usd
+            delta = total - prev_total
+            prev_total = total
+            if attached is not None:
+                await attached.emit({
+                    "ev": "cost.tick",
+                    "delta": round(delta, 6),
+                    "total": round(total, 4),
+                    "elapsed": round(tracker.elapsed_seconds, 1),
+                })
             if tracker.should_warn():
                 warn_msg = f"⚠ Cost warning: ${tracker.estimated_cost_usd:.2f} reached"
                 logger.warning(warn_msg)
@@ -1295,6 +1431,23 @@ async def _run_talk(
     await player.drain(timeout=5.0)
     await impl.close()
     player.stop()
+
+    # Detach + shutdown the UI control server. Done after impl.close() so any
+    # last events (final transcripts, last cost tick) have a chance to flush
+    # before we tell the clients the session is done.
+    if attached is not None:
+        try:
+            await attached._server.detach_session(reason=end_reason)
+        except Exception:
+            logger.exception("detach_session failed (non-fatal)")
+    if control_server_task is not None:
+        control_server_task.cancel()
+        try:
+            await control_server_task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("control_server_task shutdown raised (non-fatal)")
 
     if not farewell_via_model:
         # Fallback: speak via Edge TTS locally so user always gets a closing cue.
