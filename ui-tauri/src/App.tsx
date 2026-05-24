@@ -202,6 +202,45 @@ function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // Track muted in a ref so the global-shortcut callback (registered once)
+  // always sees the latest value without re-registering on every render.
+  const mutedRef = useRef(muted);
+  useEffect(() => {
+    mutedRef.current = muted;
+  }, [muted]);
+
+  // Global mute toggle shortcut — fires even when the app is not focused.
+  // Useful in the menubar mode where the popover is rarely the active window.
+  // Uses CmdOrCtrl+Shift+M (won't clash with system ⌘M = minimize).
+  useEffect(() => {
+    let registered = false;
+    const accelerator = "CmdOrCtrl+Shift+M";
+    (async () => {
+      try {
+        const { register, unregister, isRegistered } = await import("@tauri-apps/plugin-global-shortcut");
+        if (await isRegistered(accelerator)) {
+          await unregister(accelerator);
+        }
+        await register(accelerator, (e) => {
+          // Only fire on key down to avoid double-toggling on key up.
+          if (e.state === "Pressed") {
+            clientRef.current?.send({ op: "mute", on: !mutedRef.current });
+          }
+        });
+        registered = true;
+      } catch (err) {
+        // Not running inside Tauri (e.g. plain web preview) — skip silently.
+        console.info("global-shortcut unavailable:", err);
+      }
+    })();
+    return () => {
+      if (!registered) return;
+      void import("@tauri-apps/plugin-global-shortcut").then(({ unregister }) =>
+        unregister(accelerator).catch(() => {}),
+      );
+    };
+  }, []);
+
   return (
     <div
       style={{

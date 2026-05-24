@@ -5,6 +5,8 @@
 // `icons/32x32.png`) toggles it on click. When shown, the window is
 // positioned near the tray icon so it feels like a popover.
 
+use std::process::{Command, Stdio};
+
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
@@ -17,10 +19,44 @@ use tauri::ActivationPolicy;
 
 const TRAY_ICON_BYTES: &[u8] = include_bytes!("../icons/32x32.png");
 
+/// Hardcoded path to the uv-managed CLI venv shim. Resolved at build time
+/// from the project layout: ../voice-realtime/.venv/bin/voice-realtime relative
+/// to ui-tauri/src-tauri. Adjust if the project is relocated.
+const CLI_BIN: &str = "/Users/stephanedufresne/OBSIDIAN/PROJETS DEV/voice-realtime/.venv/bin/voice-realtime";
+
+/// Spawn `voice-realtime talk --ui --persona <slug>` as a detached background
+/// process. Stdout/stderr are swallowed — the UI observes session state
+/// through the WS control server, not the subprocess streams. Returns Ok as
+/// soon as the spawn succeeds (does not wait for the CLI to be ready).
+#[tauri::command]
+async fn spawn_cli_session(persona: String, max_minutes: Option<f64>) -> Result<(), String> {
+    let max = max_minutes.unwrap_or(30.0);
+    let max_str = format!("{}", max);
+    let result = Command::new(CLI_BIN)
+        .args([
+            "talk",
+            "--ui",
+            "--persona",
+            &persona,
+            "--max-minutes",
+            &max_str,
+            "--clean-terminal",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+    match result {
+        Ok(_child) => Ok(()),
+        Err(err) => Err(format!("failed to spawn CLI ({}): {}", CLI_BIN, err)),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
             #[cfg(target_os = "macos")]
             {
@@ -60,7 +96,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![])
+        .invoke_handler(tauri::generate_handler![spawn_cli_session])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -5,6 +5,7 @@
 // Once Phase I (spawn-CLI-from-UI) ships, the CTA will actually launch the
 // CLI as a hidden subprocess instead of asking the user to copy the command.
 
+import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
 import { Avatar } from "../components/Avatar";
 import { Kbd } from "../components/Kbd";
@@ -27,9 +28,36 @@ export function WelcomeView({ personas, closeReason, onSettings }: WelcomeViewPr
     }
   }, [personas.length, selectedIdx]);
 
+  const [launching, setLaunching] = useState(false);
+  const [launchError, setLaunchError] = useState<string | null>(null);
+
+  const launchSession = useCallback(async (personaId: string) => {
+    setLaunching(true);
+    setLaunchError(null);
+    try {
+      await invoke("spawn_cli_session", { persona: personaId });
+      // Server.session.opened will be broadcast within ~3s when the CLI
+      // connects to its provider; the parent App.tsx flips to ActiveSession
+      // automatically on that event. Keep the spinner briefly so the user
+      // sees feedback.
+      window.setTimeout(() => setLaunching(false), 4000);
+    } catch (err) {
+      setLaunchError(String(err));
+      setLaunching(false);
+    }
+  }, []);
+
   const onKey = useCallback(
     (e: KeyboardEvent) => {
       if (personas.length === 0) return;
+      // ⌘↵ → launch selected
+      if (e.metaKey && e.key === "Enter") {
+        e.preventDefault();
+        if (personas[selectedIdx]) {
+          void launchSession(personas[selectedIdx].id);
+        }
+        return;
+      }
       // ⌘1 - ⌘9 to jump to a persona
       if (e.metaKey && e.key >= "1" && e.key <= "9") {
         const idx = parseInt(e.key, 10) - 1;
@@ -47,7 +75,7 @@ export function WelcomeView({ personas, closeReason, onSettings }: WelcomeViewPr
         setSelectedIdx((i) => Math.max(0, i - 1));
       }
     },
-    [personas.length],
+    [personas, selectedIdx, launchSession],
   );
 
   useEffect(() => {
@@ -201,7 +229,49 @@ export function WelcomeView({ personas, closeReason, onSettings }: WelcomeViewPr
               </span>
             </div>
           </div>
-          <CopyableCommand persona={selected.id} />
+          <button
+            type="button"
+            onClick={() => void launchSession(selected.id)}
+            disabled={launching}
+            style={{
+              width: "100%",
+              background: launching ? "var(--mf-panel-3)" : "var(--mf-acc)",
+              color: launching ? "var(--mf-dim)" : "rgba(0,0,0,0.85)",
+              border: "none",
+              borderRadius: 8,
+              padding: "10px 12px",
+              cursor: launching ? "wait" : "pointer",
+              font: "inherit",
+              fontWeight: 600,
+              fontSize: 13,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              transition: "background 160ms",
+            }}
+            title="⌘↵ to start"
+          >
+            <span style={{ fontSize: 11 }}>{launching ? "⏳" : "▶"}</span>
+            {launching ? "Launching CLI…" : `Start with ${selected.name}`}
+            <span style={{ marginLeft: "auto", display: "flex", gap: 3 }}>
+              <Kbd>⌘</Kbd>
+              <Kbd>↵</Kbd>
+            </span>
+          </button>
+          {launchError ? (
+            <p
+              className="mf-cap"
+              style={{ color: "var(--mf-danger)", marginTop: 6, marginBottom: 0, fontSize: 11 }}
+            >
+              {launchError}
+            </p>
+          ) : null}
+          <details style={{ marginTop: 6 }}>
+            <summary className="mf-cap mf-dim" style={{ cursor: "pointer", fontSize: 10 }}>
+              or run manually in terminal
+            </summary>
+            <CopyableCommand persona={selected.id} />
+          </details>
         </div>
       ) : null}
     </div>
