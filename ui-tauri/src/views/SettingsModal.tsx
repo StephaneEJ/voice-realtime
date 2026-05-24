@@ -6,12 +6,9 @@
 import { useEffect, useState } from "react";
 import { Avatar } from "../components/Avatar";
 import { StatusChip } from "../components/StatusChip";
-import {
-  openPersonaInObsidian,
-  openPersonasFolderInObsidian,
-  openSecretsFile,
-} from "../lib/vault";
+import { openSecretsFile } from "../lib/vault";
 import type { Persona, SettingsSnapshot } from "../lib/models";
+import { PersonaEditorModal } from "./PersonaEditorModal";
 
 export type SettingsTab = "keys" | "models" | "budget" | "personas";
 
@@ -22,6 +19,8 @@ export interface SettingsModalProps {
   personas: Persona[];
   /** Triggered when the modal opens — parent should send WSCommand settings.get. */
   onRefresh: () => void;
+  /** Called after a persona is created/edited so the parent re-fetches the list. */
+  onPersonasRefresh: () => void;
 }
 
 const TABS: { id: SettingsTab; label: string }[] = [
@@ -31,8 +30,23 @@ const TABS: { id: SettingsTab; label: string }[] = [
   { id: "personas", label: "Personas" },
 ];
 
-export function SettingsModal({ open, onClose, settings, personas, onRefresh }: SettingsModalProps) {
+export function SettingsModal({
+  open,
+  onClose,
+  settings,
+  personas,
+  onRefresh,
+  onPersonasRefresh,
+}: SettingsModalProps) {
   const [tab, setTab] = useState<SettingsTab>("keys");
+  const [editorSlug, setEditorSlug] = useState<string | undefined>(undefined);
+  const [editorOpen, setEditorOpen] = useState(false);
+
+  const openEditor = (slug: string | undefined) => {
+    setEditorSlug(slug);
+    setEditorOpen(true);
+  };
+  const closeEditor = () => setEditorOpen(false);
 
   useEffect(() => {
     if (!open) return;
@@ -162,10 +176,17 @@ export function SettingsModal({ open, onClose, settings, personas, onRefresh }: 
           ) : tab === "budget" ? (
             <BudgetTab settings={settings} />
           ) : (
-            <PersonasTab personas={personas} />
+            <PersonasTab personas={personas} onEdit={openEditor} />
           )}
         </div>
       </div>
+      <PersonaEditorModal
+        editingSlug={editorSlug}
+        existingSlugs={new Set(personas.map((p) => p.id))}
+        open={editorOpen}
+        onClose={closeEditor}
+        onSaved={onPersonasRefresh}
+      />
     </div>
   );
 }
@@ -296,16 +317,27 @@ function BudgetTab({ settings }: { settings: SettingsSnapshot }) {
   );
 }
 
-function PersonasTab({ personas }: { personas: Persona[] }) {
+function PersonasTab({
+  personas,
+  onEdit,
+}: {
+  personas: Persona[];
+  /** Called with undefined → create new, or with a slug → edit existing. */
+  onEdit: (slug: string | undefined) => void;
+}) {
+  const newBtn = (
+    <button type="button" onClick={() => onEdit(undefined)} style={{ ...LINK_BTN, fontWeight: 600 }}>
+      + New persona
+    </button>
+  );
+
   if (personas.length === 0) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <p className="mf-dim mf-body">
-          Aucune persona — crée le premier fichier dans <code>_System/voice-personas/</code>.
+          Aucune persona — crée la première via le bouton ci-dessous.
         </p>
-        <button type="button" onClick={() => void openPersonasFolderInObsidian()} style={LINK_BTN}>
-          Open folder in Obsidian ↗
-        </button>
+        {newBtn}
       </div>
     );
   }
@@ -333,15 +365,11 @@ function PersonasTab({ personas }: { personas: Persona[] }) {
           </div>
           <button
             type="button"
-            onClick={() => void openPersonaInObsidian(p.id)}
-            title="Edit in Obsidian"
-            style={{
-              ...LINK_BTN,
-              padding: "4px 8px",
-              fontSize: 10,
-            }}
+            onClick={() => onEdit(p.id)}
+            title="Edit in-app"
+            style={{ ...LINK_BTN, padding: "4px 8px", fontSize: 10 }}
           >
-            Edit ↗
+            Edit
           </button>
         </div>
       ))}
@@ -349,9 +377,7 @@ function PersonasTab({ personas }: { personas: Persona[] }) {
         <p className="mf-cap mf-dim" style={{ margin: 0 }}>
           Source: <code>_System/voice-personas/</code>
         </p>
-        <button type="button" onClick={() => void openPersonasFolderInObsidian()} style={LINK_BTN}>
-          New persona ↗
-        </button>
+        {newBtn}
       </div>
     </div>
   );

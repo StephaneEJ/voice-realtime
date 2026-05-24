@@ -58,12 +58,17 @@ export function WelcomeView({ personas, closeReason, onSettings }: WelcomeViewPr
         }
         return;
       }
-      // ⌘1 - ⌘9 to jump to a persona
-      if (e.metaKey && e.key >= "1" && e.key <= "9") {
-        const idx = parseInt(e.key, 10) - 1;
-        if (idx < personas.length) {
-          e.preventDefault();
-          setSelectedIdx(idx);
+      // ⌘1 - ⌘9 to jump to a persona — use e.code (physical key) instead
+      // of e.key (logical), so AZERTY/QWERTZ users hit Digit1 even though
+      // the typed character would be & or ! without Shift.
+      if (e.metaKey && e.code.startsWith("Digit")) {
+        const digit = parseInt(e.code.slice(5), 10);
+        if (digit >= 1 && digit <= 9) {
+          const idx = digit - 1;
+          if (idx < personas.length) {
+            e.preventDefault();
+            setSelectedIdx(idx);
+          }
         }
         return;
       }

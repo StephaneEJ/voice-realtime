@@ -6,8 +6,26 @@
   "permissions": [
     "core:default",
     "opener:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "obsidian://*" },
+        { "url": "file://*" },
+        { "url": "https://*" },
+        { "url": "http://*" }
+      ]
+    },
     "global-shortcut:allow-register",
     "global-shortcut:allow-unregister",
-    "global-shortcut:allow-is-registered"
+    "global-shortcut:allow-is-registered",
+    "fs:allow-write-text-file",
+    "fs:allow-read-text-file",
+    "fs:allow-exists",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "$HOME/OBSIDIAN/2ND_CERVEAU/_System/voice-personas/*" }
+      ]
+    }
   ]
 }

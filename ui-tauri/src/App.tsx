@@ -185,6 +185,19 @@ function App() {
 
   const refreshSettings = useCallback(() => {
     clientRef.current?.send({ op: "settings.get" });
+    // Also re-list personas in case the user just edited / created one in
+    // Obsidian via the Personas tab links.
+    clientRef.current?.send({ op: "personas.list" });
+  }, []);
+
+  // Refetch personas when the window regains focus — covers the round-trip
+  // from "+ New persona" → user creates+saves in Obsidian → comes back here.
+  useEffect(() => {
+    function onFocus() {
+      clientRef.current?.send({ op: "personas.list" });
+    }
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, []);
 
   const openSettings = useCallback(() => setSettingsOpen(true), []);
@@ -280,6 +293,7 @@ function App() {
         settings={settings}
         personas={personas}
         onRefresh={refreshSettings}
+        onPersonasRefresh={() => clientRef.current?.send({ op: "personas.list" })}
       />
     </div>
   );

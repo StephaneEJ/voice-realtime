@@ -60,6 +60,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_fs::init())
         .setup(|app| {
             // ActivationPolicy::Accessory disabled while debugging tray
             // visibility on macOS 15.5 — Sequoia + non-bundled dev binary +
