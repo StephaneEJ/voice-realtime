@@ -89,7 +89,7 @@ from rich.text import Text
 
 from .config import SECRETS_PATH, load_config
 from .context_loader import build_context
-from .cost_tracker import CostTracker, monthly_total_usd
+from .cost_tracker import CostTracker, daily_total_usd, historical_series, monthly_total_usd, weekly_total_usd
 from .latency_tracker import LatencyTracker
 from .log import get_logger, setup_logging
 from .providers.base import ProviderConfig
@@ -293,13 +293,15 @@ def persona_show(slug: str = typer.Argument(..., help="Persona slug")) -> None:
 
 @app.command()
 def status() -> None:
-    """Show config status + monthly cost so far. No network."""
+    """Show config status + cost breakdown (today / week / month) + 30d sparkline."""
     try:
         cfg = load_config()
     except FileNotFoundError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
 
+    daily = daily_total_usd()
+    weekly = weekly_total_usd(days=7)
     monthly = monthly_total_usd()
     pct = (monthly / cfg.monthly_budget_usd * 100.0) if cfg.monthly_budget_usd > 0 else 0.0
     lines = [
@@ -307,9 +309,22 @@ def status() -> None:
         f"OpenAI key   : {'present' if cfg.has_openai else 'MISSING'}",
         f"Gemini key   : {'present' if cfg.has_gemini else 'MISSING'}",
         f"Budget cap   : ${cfg.monthly_budget_usd:.2f}/month",
-        f"Used so far  : ${monthly:.4f} ({pct:.1f}%)",
+        f"Today        : ${daily:.4f}",
+        f"Last 7 days  : ${weekly:.4f}",
+        f"This month   : ${monthly:.4f} ({pct:.1f}%)",
     ]
     console.print(Panel("\n".join(lines), title="voice-realtime status", border_style="cyan"))
+
+    # Compact 30-day sparkline using block characters. Each day = one char.
+    series = historical_series(days=30)
+    if series:
+        max_val = max(v for _, v in series) or 1.0
+        blocks = " ▁▂▃▄▅▆▇█"
+        spark = "".join(blocks[min(8, int(v / max_val * 8))] for _, v in series)
+        start_label = series[0][0]
+        end_label = series[-1][0]
+        console.print(f"[dim]30-day cost sparkline ({start_label} → {end_label}, max=${max_val:.2f}/day):[/dim]")
+        console.print(f"  [cyan]{spark}[/cyan]")
 
 
 @app.command()

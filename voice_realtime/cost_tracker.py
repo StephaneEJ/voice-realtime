@@ -116,6 +116,40 @@ class CostTracker:
         return path
 
 
+def _iter_session_records():
+    """Yield (path, parsed record dict) for every jsonl line on disk.
+
+    Errors (unreadable file, bad JSON line) are skipped silently — one bad
+    record shouldn't hide the rest.
+    """
+    for path in SESSIONS_DIR.glob("*.jsonl"):
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                yield path, json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+
+def _record_ended_dt(record: dict) -> datetime | None:
+    """Best-effort parse of `ended_iso` (preferred) or `started_iso`."""
+    for key in ("ended_iso", "started_iso"):
+        raw = record.get(key)
+        if not raw:
+            continue
+        try:
+            return datetime.fromisoformat(raw)
+        except (ValueError, TypeError):
+            continue
+    return None
+
+
 def monthly_total_usd() -> float:
     """Sum estimated_cost_usd from all session jsonl files this month."""
     now = datetime.now(timezone.utc)
@@ -133,3 +167,64 @@ def monthly_total_usd() -> float:
         except (OSError, json.JSONDecodeError):
             continue
     return total
+
+
+def daily_total_usd(day: datetime | None = None) -> float:
+    """Sum estimated_cost_usd for sessions that ended on `day` (default today UTC)."""
+    if day is None:
+        day = datetime.now(timezone.utc)
+    target_date = day.date()
+    total = 0.0
+    for _path, record in _iter_session_records():
+        ended = _record_ended_dt(record)
+        if ended is None:
+            continue
+        if ended.date() == target_date:
+            total += float(record.get("estimated_cost_usd", 0.0))
+    return total
+
+
+def weekly_total_usd(days: int = 7, now: datetime | None = None) -> float:
+    """Sum estimated_cost_usd for sessions ended in the trailing `days` window.
+
+    `days=7` = trailing 7 days, NOT the ISO calendar week — matches what the
+    Stéphane usually wants ("how much did I spend in the last week").
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    cutoff = now.timestamp() - days * 86400
+    total = 0.0
+    for _path, record in _iter_session_records():
+        ended = _record_ended_dt(record)
+        if ended is None:
+            continue
+        if ended.timestamp() >= cutoff:
+            total += float(record.get("estimated_cost_usd", 0.0))
+    return total
+
+
+def historical_series(days: int = 30, now: datetime | None = None) -> list[tuple[str, float]]:
+    """Return `[(YYYY-MM-DD, total_usd)]` for each of the trailing `days` days,
+    oldest first. Days with no sessions are present with total=0.0 so the UI
+    can draw a continuous sparkline.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    from datetime import timedelta
+    buckets: dict[str, float] = {}
+    # Seed bucket for every day in window so empty days show as 0.0
+    for offset in range(days):
+        d = (now - timedelta(days=offset)).date().isoformat()
+        buckets[d] = 0.0
+    # Aggregate matching records
+    cutoff = now.timestamp() - days * 86400
+    for _path, record in _iter_session_records():
+        ended = _record_ended_dt(record)
+        if ended is None:
+            continue
+        if ended.timestamp() < cutoff:
+            continue
+        key = ended.date().isoformat()
+        if key in buckets:
+            buckets[key] += float(record.get("estimated_cost_usd", 0.0))
+    return sorted(buckets.items())
