@@ -8,6 +8,7 @@ import { StatusBanner } from "./views/StatusBanner";
 import { WelcomeView } from "./views/WelcomeView";
 import { ActiveSessionView, LiveSession } from "./views/ActiveSessionView";
 import { SettingsModal } from "./views/SettingsModal";
+import { EdgeStateBanners } from "./views/EdgeStateBanners";
 import {
   ConnectionState,
   createVoiceRTClient,
@@ -161,6 +162,9 @@ function App() {
       setReconnectAttempt(attempt);
       if (next === "connected") {
         client.send({ op: "personas.list" });
+        // Pull settings on every connect so edge banners (no key, budget hit)
+        // react quickly without waiting for the user to open the modal.
+        client.send({ op: "settings.get" });
       }
     });
     client.connect();
@@ -213,6 +217,7 @@ function App() {
       }}
     >
       <StatusBanner state={connState} attempt={reconnectAttempt} />
+      <EdgeStateBanners settings={settings} closeReason={closeReason} onOpenSettings={openSettings} />
       {session ? (
         <ActiveSessionView
           session={session}
