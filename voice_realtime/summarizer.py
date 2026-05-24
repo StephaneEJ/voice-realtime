@@ -185,6 +185,66 @@ def _append_to_project(project_path: Path, section: str) -> None:
     project_path.write_text(new_content, encoding="utf-8")
 
 
+def _replace_placeholder_in_transcript(transcript_path: Path, summary: "SummaryResult") -> bool:
+    """Replace the "à compléter manuellement" placeholder in the voice-session
+    note with the actual synthesis (decisions / actions / insights / questions).
+
+    Returns True if the file was modified. Idempotent — if the synthesis is
+    already in place, leaves the file alone.
+    """
+    if not transcript_path.exists():
+        return False
+    current = transcript_path.read_text(encoding="utf-8")
+    placeholder = "_(à compléter manuellement ou via skill /summarize-voice à venir)_"
+    inline_block_lines = [
+        "## Notes post-session — Synthèse auto",
+        "",
+        f"**Sujet :** {summary.topic_summary or 'non précisé'}",
+        "",
+        "### Décisions",
+    ]
+    if summary.decisions:
+        inline_block_lines.extend(f"- {d}" for d in summary.decisions)
+    else:
+        inline_block_lines.append("- _(aucune)_")
+    inline_block_lines.extend(["", "### Actions"])
+    if summary.actions:
+        for a in summary.actions:
+            what = a.get("what", "").strip()
+            when_v = a.get("when", "unspecified")
+            owner = a.get("owner", "stephane")
+            inline_block_lines.append(f"- [ ] {what} — {owner} — {when_v}")
+    else:
+        inline_block_lines.append("- _(aucune)_")
+    inline_block_lines.extend(["", "### Insights"])
+    if summary.insights:
+        inline_block_lines.extend(f"- {i}" for i in summary.insights)
+    else:
+        inline_block_lines.append("- _(aucun)_")
+    inline_block_lines.extend(["", "### Questions ouvertes"])
+    if summary.unresolved_questions:
+        inline_block_lines.extend(f"- {q}" for q in summary.unresolved_questions)
+    else:
+        inline_block_lines.append("- _(aucune)_")
+    inline_block = "\n".join(inline_block_lines)
+
+    if "## Notes post-session — Synthèse auto" in current:
+        return False  # already done — idempotent
+
+    if "## Notes post-session" in current and placeholder in current:
+        new = current.replace(
+            "## Notes post-session\n\n" + placeholder,
+            inline_block,
+        )
+        if new == current:
+            # Fall through to appending
+            new = current.rstrip() + "\n\n" + inline_block + "\n"
+    else:
+        new = current.rstrip() + "\n\n" + inline_block + "\n"
+    transcript_path.write_text(new, encoding="utf-8")
+    return True
+
+
 def summarize_session(
     transcript_path: Path,
     project_hint: str | None = None,
@@ -233,5 +293,16 @@ def summarize_session(
             result.project_note_path = project_note
             result.appended = True
             logger.info("Appended synthesis to %s", project_note)
+
+    # Also rewrite the voice-session note: replace the "à compléter
+    # manuellement" placeholder with the actual synthesis so the file is
+    # self-contained when read directly (no need to bounce to the project
+    # note to know what was discussed).
+    try:
+        modified = _replace_placeholder_in_transcript(transcript_path, result)
+        if modified:
+            logger.info("Inlined synthesis into transcript note %s", transcript_path.name)
+    except Exception as exc:
+        logger.warning("Could not inline synthesis into transcript: %r", exc)
 
     return result
