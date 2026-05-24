@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Literal, Protocol
 
 ThinkingLevel = Literal["minimal", "low", "medium", "high", "very_high"]
+VADPreset = Literal["reactive", "balanced", "patient", "very-patient"]
 EventKind = Literal[
     "partial_transcript_user",
     "final_transcript_user",
@@ -31,6 +32,12 @@ class ProviderConfig:
     # testing whether Gemini Live STT improves at 24kHz vs the default 16kHz
     # on French rapid speech. None = use provider's default constant.
     input_sample_rate: int | None = None
+    # VAD preset (server-side voice activity detection sensitivity). Controls
+    # how easily the server interrupts the model when ambient noise is picked
+    # up. None = providers default to "balanced". Choose "patient" or
+    # "very-patient" in noisy environments where the model gets cut off by
+    # background sounds.
+    vad: VADPreset | None = None
 
 
 @dataclass(frozen=True)

@@ -24,6 +24,19 @@ DEFAULT_MODEL = "gpt-realtime-2"
 # 2026-05-21 NOTE: gpt-realtime-2 confirmed available via client.models.list().
 # Alternatives: gpt-realtime (latest alias), gpt-realtime-mini (cheaper), gpt-realtime-1.5 (legacy).
 
+# VAD presets — server_vad turn_detection sensitivity. Matches the Gemini
+# preset names so a persona can use the same `vad` field across providers.
+# threshold = energy gate (0.5 = sensitive, 0.8 = needs clear voice).
+# prefix_padding_ms = audio kept before speech start was detected.
+# silence_duration_ms = how long of trailing silence ends a user turn.
+OPENAI_VAD_PRESETS: dict[str, dict] = {
+    "reactive":     {"threshold": 0.55, "prefix_padding_ms": 250, "silence_duration_ms": 500},
+    "balanced":     {"threshold": 0.65, "prefix_padding_ms": 350, "silence_duration_ms": 900},
+    "patient":      {"threshold": 0.70, "prefix_padding_ms": 450, "silence_duration_ms": 1400},
+    "very-patient": {"threshold": 0.75, "prefix_padding_ms": 550, "silence_duration_ms": 2200},
+}
+OPENAI_VAD_DEFAULT = "balanced"
+
 
 class OpenAIRealtimeProvider:
     """OpenAI Realtime wrapper. Supports text-only OR audio I/O depending on `audio` arg."""
@@ -50,20 +63,27 @@ class OpenAIRealtimeProvider:
             "instructions": system_prompt,
         }
         if audio:
+            vad_name = config.vad or OPENAI_VAD_DEFAULT
+            vad_preset = OPENAI_VAD_PRESETS.get(vad_name, OPENAI_VAD_PRESETS[OPENAI_VAD_DEFAULT])
+            logger.debug(
+                f"VAD preset='{vad_name}' threshold={vad_preset['threshold']} "
+                f"prefix_padding_ms={vad_preset['prefix_padding_ms']} "
+                f"silence_duration_ms={vad_preset['silence_duration_ms']}"
+            )
             session_payload["audio"] = {
                 "input": {
                     "format": {"type": "audio/pcm", "rate": OPENAI_AUDIO_SAMPLE_RATE},
-                    # Defaults (threshold=0.5, silence_duration=200ms) were too sensitive:
-                    # 2026-05-23 test session = 32 speech_started in 59s, one every 1.8s.
-                    # Each false-trigger ran our model_interrupted handler → player.flush()
-                    # cut the model's audio mid-sentence before the user could hear it.
-                    # Threshold 0.75 + 600ms silence requires a deliberate utterance, not
-                    # ambient breathing.
+                    # VAD sensitivity controlled by --vad CLI flag or persona frontmatter.
+                    # Defaults to "balanced". Pick "patient" / "very-patient" in noisy
+                    # environments to stop the server from cutting the model on small
+                    # ambient sounds. The previous hardcoded values (0.75 / 600ms) were
+                    # added 2026-05-23 against OpenAI's too-sensitive defaults; they now
+                    # map to the "very-patient" preset.
                     "turn_detection": {
                         "type": "server_vad",
-                        "threshold": 0.75,
-                        "prefix_padding_ms": 300,
-                        "silence_duration_ms": 600,
+                        "threshold": vad_preset["threshold"],
+                        "prefix_padding_ms": vad_preset["prefix_padding_ms"],
+                        "silence_duration_ms": vad_preset["silence_duration_ms"],
                     },
                     # Enable Whisper-based STT of user audio for terminal transcript
                     "transcription": {"model": "whisper-1"},

@@ -28,6 +28,26 @@ DEFAULT_MODEL = "gemini-2.5-flash-native-audio-latest"
 GEMINI_INPUT_SAMPLE_RATE = 16000   # Gemini Live expects 16kHz input
 GEMINI_OUTPUT_SAMPLE_RATE = 24000  # outputs 24kHz
 
+# VAD presets — how aggressively the server interrupts the model when it
+# detects user speech. Stéphane complained 2026-05-24 that the model stopped
+# speaking at the slightest ambient noise (construction sounds outside).
+# Picking "patient" or "very-patient" makes the server require a clearer,
+# longer utterance before interrupting.
+#
+# Field semantics (Gemini Live realtime_input_config.automatic_activity_detection):
+# - start_of_speech_sensitivity: how easily the server flags speech START
+#   (HIGH = trigger on small sounds, LOW = need clear utterance)
+# - end_of_speech_sensitivity: how aggressively the server flags speech END
+#   (HIGH = ends fast on pause, LOW = waits longer through pauses)
+# - silence_duration_ms: how long of a silence terminates a user turn
+GEMINI_VAD_PRESETS: dict[str, dict] = {
+    "reactive":     {"start": "START_SENSITIVITY_HIGH", "end": "END_SENSITIVITY_HIGH", "silence_duration_ms": 400},
+    "balanced":     {"start": "START_SENSITIVITY_HIGH", "end": "END_SENSITIVITY_LOW",  "silence_duration_ms": 700},
+    "patient":      {"start": "START_SENSITIVITY_LOW",  "end": "END_SENSITIVITY_LOW",  "silence_duration_ms": 1200},
+    "very-patient": {"start": "START_SENSITIVITY_LOW",  "end": "END_SENSITIVITY_LOW",  "silence_duration_ms": 2000},
+}
+GEMINI_VAD_DEFAULT = "balanced"
+
 
 class GeminiProvider:
     """Gemini Live wrapper with transparent multi-turn reconnect.
@@ -66,6 +86,17 @@ class GeminiProvider:
             live_config["output_audio_transcription"] = {}
             if self._audio_mode:
                 live_config["input_audio_transcription"] = {}
+                vad_name = (self._provider_config.vad if self._provider_config else None) or GEMINI_VAD_DEFAULT
+                vad = GEMINI_VAD_PRESETS.get(vad_name, GEMINI_VAD_PRESETS[GEMINI_VAD_DEFAULT])
+                live_config["realtime_input_config"] = {
+                    "automatic_activity_detection": {
+                        "disabled": False,
+                        "start_of_speech_sensitivity": vad["start"],
+                        "end_of_speech_sensitivity": vad["end"],
+                        "silence_duration_ms": vad["silence_duration_ms"],
+                    }
+                }
+                _dbg(f"VAD preset='{vad_name}' silence_duration_ms={vad['silence_duration_ms']} start={vad['start']} end={vad['end']}")
         else:
             live_config["response_modalities"] = ["TEXT"]
         return live_config

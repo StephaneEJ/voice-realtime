@@ -415,6 +415,11 @@ def talk(
         "--mic-rate",
         help="Override mic sample rate (Hz). 0 = provider default (Gemini 16000, OpenAI 24000). Try 24000 on Gemini to see if FR STT improves on rapid speech.",
     ),
+    vad: str = typer.Option(
+        "balanced",
+        "--vad",
+        help="VAD sensitivity preset: reactive | balanced | patient | very-patient. Controls how easily the server interrupts the model on ambient noise. Pick 'patient' or 'very-patient' in noisy environments (default: balanced).",
+    ),
 ) -> None:
     """M2-M4: duplex audio session with context injection, cost tracking, vault save."""
     try:
@@ -483,6 +488,7 @@ def talk(
             recap_interval=recap_interval,
             recap_user_chars=recap_user_chars,
             mic_rate_override=mic_rate or None,
+            vad=vad,
         )
     )
 
@@ -505,6 +511,7 @@ async def _run_talk(
     recap_interval: float = 420.0,
     recap_user_chars: int = 2500,
     mic_rate_override: int | None = None,
+    vad: str = "balanced",
 ) -> None:
     # Lazy import audio to avoid PortAudio errors at module load
     from .audio.microphone import MicrophoneStream
@@ -538,9 +545,14 @@ async def _run_talk(
         output_rate = GEMINI_OUTPUT_SAMPLE_RATE
         impl = GeminiProvider()  # type: ignore[assignment]
 
+    valid_vads = {"reactive", "balanced", "patient", "very-patient"}
+    if vad not in valid_vads:
+        console.print(f"[red]Unknown --vad value: {vad!r}. Use one of: {', '.join(sorted(valid_vads))}[/red]")
+        raise typer.Exit(1)
+
     pcfg = ProviderConfig(
         model=model, api_key=api_key, thinking_level="low", voice=voice,
-        input_sample_rate=input_rate,
+        input_sample_rate=input_rate, vad=vad,  # type: ignore[arg-type]
     )
 
     if log_path is not None:
@@ -550,6 +562,7 @@ async def _run_talk(
         f"Provider: {provider_name} / {model}\n"
         f"Project context: {project_hint or 'none'}\n"
         f"Mic rate: {input_rate} Hz\n"
+        f"VAD preset: {vad}\n"
         f"Max duration: {max_minutes:.0f} min\n"
         f"Cost cap: ${cost_cap:.2f}\n"
         f"Ctrl+C to stop."
