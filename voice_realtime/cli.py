@@ -328,6 +328,32 @@ def status() -> None:
 
 
 @app.command()
+def serve(
+    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind. Default: loopback only."),
+    port: int = typer.Option(7711, "--port", help="WS port. Schema imposed by design handoff."),
+) -> None:
+    """Start the WebSocket control server for the native UI app (Phase 3.F.1).
+
+    The native macOS UI connects to ws://127.0.0.1:7711 and exchanges JSON
+    messages following the schema in `design/README.md`. Audio capture and
+    playback live on the UI side; the server forwards PCM16 to the chosen
+    provider (Gemini Live / OpenAI Realtime) and streams events back.
+
+    Test manually with websocat:
+        voice-realtime serve &
+        websocat ws://127.0.0.1:7711
+        # then paste:
+        # {"op":"session.start","personaId":"jarvis"}
+    """
+    from .control_server import run_server
+    console.print(f"[cyan]Starting control server on ws://{host}:{port} — Ctrl+C to stop[/cyan]")
+    try:
+        asyncio.run(run_server(host=host, port=port))
+    except KeyboardInterrupt:
+        console.print("\n[dim]control server stopped[/dim]")
+
+
+@app.command()
 def hello(
     message: str = typer.Option(
         "Bonjour. Réponds en une phrase pour confirmer la connexion.",
