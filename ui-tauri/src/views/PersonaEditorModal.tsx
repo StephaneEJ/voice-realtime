@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import {
   PersonaFile,
+  deletePersonaFile,
   emptyPersonaFile,
   personaExists,
   readPersonaFile,
@@ -52,12 +53,17 @@ export function PersonaEditorModal({
   const [persona, setPersona] = useState<PersonaFile | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [touchedSlug, setTouchedSlug] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setError(null);
+    setConfirmDelete(false);
+    setSaving(false);
+    setDeleting(false);
     if (editingSlug === undefined) {
       // create mode
       setPersona(emptyPersonaFile("", ""));
@@ -101,24 +107,52 @@ export function PersonaEditorModal({
   };
 
   const save = async () => {
-    if (!persona || !canSave) return;
+    if (!persona || !canSave) {
+      console.warn("[persona-editor] save() called but canSave=false", {
+        persona,
+        canSave,
+        name: persona?.name,
+        effectiveSlug,
+        slugClash,
+        saving,
+      });
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
       const finalSlug = isCreate ? effectiveSlug : persona.slug;
-      // Extra guard against race: if creating and the file appeared since
-      // the form opened (e.g. user created it in Obsidian), bail out.
-      if (isCreate && await personaExists(finalSlug)) {
+      if (isCreate && (await personaExists(finalSlug))) {
         setError(`« ${finalSlug}.md » existe déjà sur disque.`);
         setSaving(false);
         return;
       }
+      console.log("[persona-editor] writing persona", finalSlug);
       await writePersonaFile({ ...persona, slug: finalSlug });
+      console.log("[persona-editor] write OK");
       onSaved();
       onClose();
     } catch (err) {
+      console.error("[persona-editor] save failed:", err);
       setError(`Save failed: ${err}`);
       setSaving(false);
+    }
+  };
+
+  const performDelete = async () => {
+    if (!persona || isCreate) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      console.log("[persona-editor] deleting persona", persona.slug);
+      await deletePersonaFile(persona.slug);
+      console.log("[persona-editor] delete OK");
+      onSaved();
+      onClose();
+    } catch (err) {
+      console.error("[persona-editor] delete failed:", err);
+      setError(`Delete failed: ${err}`);
+      setDeleting(false);
     }
   };
 
@@ -354,25 +388,74 @@ export function PersonaEditorModal({
             borderTop: "1px solid var(--mf-border)",
             display: "flex",
             gap: 8,
-            justifyContent: "flex-end",
+            alignItems: "center",
             background: "var(--mf-panel)",
           }}
         >
-          <button type="button" onClick={onClose} style={SECONDARY_BTN}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={() => void save()}
-            disabled={!canSave}
-            style={{
-              ...PRIMARY_BTN,
-              opacity: canSave ? 1 : 0.5,
-              cursor: canSave ? "pointer" : "not-allowed",
-            }}
-          >
-            {saving ? "Saving…" : isCreate ? "Create" : "Save"}
-          </button>
+          {confirmDelete ? (
+            // Delete confirmation takes over the entire footer — hide Save +
+            // modal Cancel to avoid the duplicate "Cancel" buttons issue.
+            <>
+              <span className="mf-cap" style={{ color: "var(--mf-warn)" }}>
+                Supprimer « {persona?.slug} » ?
+              </span>
+              <span style={{ flex: 1 }} />
+              <button type="button" onClick={() => setConfirmDelete(false)} style={SECONDARY_BTN}>
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={() => void performDelete()}
+                disabled={deleting}
+                style={{
+                  ...PRIMARY_BTN,
+                  background: "var(--mf-danger)",
+                  color: "rgba(0,0,0,0.85)",
+                  opacity: deleting ? 0.6 : 1,
+                  cursor: deleting ? "not-allowed" : "pointer",
+                }}
+              >
+                {deleting ? "Suppression…" : "Confirmer suppression"}
+              </button>
+            </>
+          ) : (
+            <>
+              {!isCreate ? (
+                <button
+                  type="button"
+                  onClick={() => setConfirmDelete(true)}
+                  style={{
+                    ...SECONDARY_BTN,
+                    color: "var(--mf-danger)",
+                    borderColor: "var(--mf-border-2)",
+                  }}
+                >
+                  Delete
+                </button>
+              ) : null}
+              <span style={{ flex: 1 }} />
+              <button type="button" onClick={onClose} style={SECONDARY_BTN}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void save()}
+                disabled={!canSave}
+                style={{
+                  ...PRIMARY_BTN,
+                  opacity: canSave ? 1 : 0.5,
+                  cursor: canSave ? "pointer" : "not-allowed",
+                }}
+                title={
+                  !canSave
+                    ? `Cannot save — name=${persona?.name?.trim() ? "ok" : "empty"} slug=${effectiveSlug || "empty"} clash=${slugClash}`
+                    : undefined
+                }
+              >
+                {saving ? "Saving…" : isCreate ? "Create" : "Save"}
+              </button>
+            </>
+          )}
         </footer>
       </div>
     </div>

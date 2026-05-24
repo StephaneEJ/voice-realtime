@@ -44,6 +44,11 @@ _KILLCHAT_PATTERNS = (
     # space-separated `chat` token keeps false positives down ("kilo de chat"
     # has a " de " between, so it doesn't match).
     re.compile(r"^\s*[.,!?]*\s*ki[a-zé]{1,4}\s+chat\s*[.,!?]*\s*$", re.IGNORECASE),
+    # Misheard tolerance for "fin jarvis" — Gemini STT FR mis-renders
+    # "jarvis" as "jardis", "jarvi", "jarvice", "jarvi", etc. (English name
+    # in French phonetic context). Pattern: `ja` + 2-5 chars including the
+    # required suffix. Anchored ^/$ keeps false positives out.
+    re.compile(r"^\s*[.,!?]*\s*fin\s+ja[a-zé]{2,5}\s*[.,!?]*\s*$", re.IGNORECASE),
 )
 # Gemini Live emits inline diarization tags around speech. Strip them so the
 # strict isolation regexes above still match when the user said only the
@@ -1544,7 +1549,9 @@ async def _run_talk(
             note_path = vault_note_path  # already computed above
             _info(f"Vault session note: {note_path}")
 
-            # Auto-summarize via `claude -p` Sonnet — appends synthesis to project note.
+            # Auto-summarize via `claude -p` Sonnet — appends synthesis to
+            # project note (if --project) AND to the session note itself so
+            # every session has its synthesis attached, viewable in Obsidian.
             if auto_summarize and (transcript_user or transcript_model):
                 _info("Auto-summarize en cours (claude -p Sonnet)...", force=True)
                 try:
@@ -1562,6 +1569,11 @@ async def _run_talk(
                     elif project_hint:
                         head += f"\nProjet « {project_hint} » introuvable — synthèse non appendée"
                     _panel(head, title="Auto-summarize", border_style="cyan", force=True)
+                    # NOTE: summarize_session already patches the session note
+                    # with a "## Notes post-session — Synthèse auto" section
+                    # (see summarizer.py::_patch_transcript_with_inline_block).
+                    # No need to append it again here — doing so would create
+                    # a duplicate block.
                 except Exception as exc:
                     logger.exception("Auto-summarize failed")
                     console.print(f"[yellow]Auto-summarize failed (non-fatal): {exc!r}[/yellow]")

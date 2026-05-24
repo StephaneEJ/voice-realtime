@@ -163,8 +163,6 @@ function App() {
       setReconnectAttempt(attempt);
       if (next === "connected") {
         client.send({ op: "personas.list" });
-        // Pull settings on every connect so edge banners (no key, budget hit)
-        // react quickly without waiting for the user to open the modal.
         client.send({ op: "settings.get" });
       }
     });
@@ -176,12 +174,40 @@ function App() {
     };
   }, [handleEvent]);
 
+  // If the WS connection drops while a session was attached, the CLI was
+  // probably killed brutally (no session.closed event arrived). Drop the
+  // session state after a short grace period so the UI bounces back to
+  // the Welcome view instead of pretending the session is still live.
+  // 4s grace lets a quick reconnect (e.g. CLI restart) recover without
+  // flicker; longer absences clear the UI cleanly.
+  useEffect(() => {
+    if (connState === "connected") return;
+    if (session === null) return;
+    const t = window.setTimeout(() => {
+      setSession((s) => {
+        if (s === null) return s;
+        setCloseReason("disconnect");
+        return null;
+      });
+    }, 4000);
+    return () => window.clearTimeout(t);
+  }, [connState, session]);
+
   const requestMute = useCallback((on: boolean) => {
     clientRef.current?.send({ op: "mute", on });
   }, []);
 
   const requestStop = useCallback(() => {
-    clientRef.current?.send({ op: "session.stop" });
+    const wsState = clientRef.current?.getState();
+    if (wsState === "connected") {
+      clientRef.current?.send({ op: "session.stop" });
+      // CLI will reply with session.closed → handleEvent clears `session`.
+    } else {
+      // WS not live — CLI is probably dead. Skip the command and clear the
+      // session state locally so the user can get back to the Welcome view.
+      setSession(null);
+      setCloseReason("local_stop_ws_down");
+    }
   }, []);
 
   const refreshSettings = useCallback(() => {

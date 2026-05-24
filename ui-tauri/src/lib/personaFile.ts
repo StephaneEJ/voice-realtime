@@ -6,7 +6,7 @@
 // editor exposes; advanced fields (obsidian_skills/notes/tools/avatar) are
 // preserved on edit by round-tripping the raw frontmatter map.
 
-import { exists, readDir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { exists, readDir, readTextFile, remove, writeTextFile } from "@tauri-apps/plugin-fs";
 import { homeDir, join } from "@tauri-apps/api/path";
 import type { Persona } from "./models";
 
@@ -35,6 +35,11 @@ async function personaPath(slug: string): Promise<string> {
 export async function personaExists(slug: string): Promise<boolean> {
   const path = await personaPath(slug);
   return await exists(path);
+}
+
+export async function deletePersonaFile(slug: string): Promise<void> {
+  const path = await personaPath(slug);
+  await remove(path);
 }
 
 /** List all persona .md files in the vault — fs-driven so the UI can show
