@@ -214,8 +214,12 @@ function App() {
         fontSize: 13,
         overflow: "hidden",
         position: "relative",
+        borderRadius: 12,
+        border: "1px solid var(--mf-border-2)",
+        boxShadow: "0 16px 50px rgba(0,0,0,0.55), 0 0 0 1px rgba(0,0,0,0.5)",
       }}
     >
+      <DragHandle />
       <StatusBanner state={connState} attempt={reconnectAttempt} />
       <EdgeStateBanners settings={settings} closeReason={closeReason} onOpenSettings={openSettings} />
       {session ? (
@@ -239,6 +243,26 @@ function App() {
         onRefresh={refreshSettings}
       />
     </div>
+  );
+}
+
+/** Invisible 8px strip at the top of the window. Tauri respects
+ *  `data-tauri-drag-region` to let the user drag the borderless window. */
+function DragHandle() {
+  return (
+    <div
+      data-tauri-drag-region
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        right: 0,
+        height: 8,
+        zIndex: 10,
+        cursor: "grab",
+      }}
+      aria-hidden="true"
+    />
   );
 }
 
