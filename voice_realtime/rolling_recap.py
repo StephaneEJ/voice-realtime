@@ -164,3 +164,64 @@ async def maybe_run_recap(
     if recap is None:
         return None
     return wrap_for_silent_injection(recap)
+
+
+# ─── Rolling terminal-context injector (Phase 3.H) ────────────────────────
+
+
+@dataclass
+class TerminalRecapState:
+    """Tracks how much of the Claude Code (or OpenCode) transcript jsonl we've
+    already injected as silent notes during this voice session. Periodically
+    we read the new bytes since the offset, render them, optionally compact
+    via claude -p Sonnet, and inject.
+    """
+
+    source_handle: object | None = None
+    last_offset_bytes: int = 0
+    last_check_at: float = field(default_factory=time.monotonic)
+    injection_count: int = 0
+    min_delta_chars: int = 600
+
+
+TERMINAL_PREFIX = (
+    "[Note système — rappel contexte terminal récent, NE RÉPONDS PAS, absorbe seulement]\n\n"
+)
+
+
+def wrap_terminal_delta(delta_text: str) -> str:
+    return TERMINAL_PREFIX + delta_text
+
+
+async def maybe_inject_terminal_delta(
+    state: TerminalRecapState,
+    interval_seconds: float,
+) -> str | None:
+    """Read new Claude Code transcript content since the last absorbed
+    offset; return a silent-note-wrapped text if there's enough new material
+    to bother injecting, else None.
+
+    Caller is responsible for actually calling `provider.send_silent_note(...)`.
+    """
+    if state.source_handle is None:
+        return None
+    now = time.monotonic()
+    if now - state.last_check_at < interval_seconds:
+        return None
+    state.last_check_at = now
+
+    # Off-thread the file read so we don't block the event loop.
+    from .cli_context import read_jsonl_delta_text
+    loop = asyncio.get_running_loop()
+    delta_text, new_offset = await loop.run_in_executor(
+        None, read_jsonl_delta_text, state.source_handle, state.last_offset_bytes,
+    )
+    if not delta_text or len(delta_text) < state.min_delta_chars:
+        # Always advance offset even when we skip — otherwise short deltas
+        # accumulate and we re-read them every loop.
+        state.last_offset_bytes = new_offset
+        return None
+    # Update offset and increment counter
+    state.last_offset_bytes = new_offset
+    state.injection_count += 1
+    return wrap_terminal_delta(delta_text)

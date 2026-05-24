@@ -377,3 +377,97 @@ def build_cli_context(
 
 # Back-compat shim so anything importing the old name still works.
 build_claude_code_context = build_cli_context
+
+
+# ─── Delta reader for rolling terminal context (Phase 3.H) ────────────────
+
+
+def jsonl_size_bytes(handle: object) -> int:
+    """Return the current size of the underlying jsonl in bytes, or 0.
+
+    Used by the rolling-terminal injector to track an absorbed offset and
+    only read new content since the last injection.
+    """
+    if isinstance(handle, Path) and handle.exists():
+        try:
+            return handle.stat().st_size
+        except OSError:
+            return 0
+    return 0
+
+
+def read_jsonl_delta_text(
+    handle: object,
+    start_offset_bytes: int,
+    max_chars: int = 20000,
+) -> tuple[str, int]:
+    """Read new Claude Code transcript content since the given byte offset.
+
+    Returns (rendered_text, new_offset_bytes). Only supports the
+    `ClaudeCodeSource` (Path-backed) handle today — the OpenCode SQLite path
+    falls back to whole-conversation diffing in the caller.
+
+    The rendered text strips tool_use / system-reminder blocks and labels
+    user/assistant turns the same way `ClaudeCodeSource.read_transcript`
+    does, just forward-iterating.
+    """
+    if not isinstance(handle, Path) or not handle.exists():
+        return "", start_offset_bytes
+    try:
+        size = handle.stat().st_size
+    except OSError:
+        return "", start_offset_bytes
+    if size <= start_offset_bytes:
+        return "", start_offset_bytes  # no new content
+
+    try:
+        with handle.open("rb") as fh:
+            fh.seek(start_offset_bytes)
+            chunk = fh.read(size - start_offset_bytes)
+    except OSError:
+        return "", start_offset_bytes
+    # Lossy decode is OK — we only want the text parts and we'll skip lines
+    # that fail to parse as JSON anyway.
+    text = chunk.decode("utf-8", errors="ignore")
+    lines = text.splitlines()
+
+    # If we started mid-line (chunk doesn't begin on a record boundary), skip
+    # the first partial line. Detect by checking whether the byte right before
+    # start_offset is a newline.
+    if start_offset_bytes > 0:
+        try:
+            with handle.open("rb") as fh:
+                fh.seek(start_offset_bytes - 1)
+                prev_byte = fh.read(1)
+            if prev_byte != b"\n":
+                lines = lines[1:]
+        except OSError:
+            pass
+
+    turns: list[str] = []
+    used = 0
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        t = event.get("type")
+        if t not in ("user", "assistant"):
+            continue
+        msg = event.get("message", {}) or {}
+        # Reuse the ClaudeCodeSource text extractor — module-level function.
+        body_text = ClaudeCodeSource._extract_text(msg.get("content")).strip()
+        if not body_text:
+            continue
+        if body_text.startswith("<system-reminder>") and body_text.endswith("</system-reminder>"):
+            continue
+        label = "Stéphane" if t == "user" else "Claude"
+        turn = f"{label}: {body_text}"
+        if used + len(turn) > max_chars:
+            break
+        turns.append(turn)
+        used += len(turn) + 2
+    rendered = "\n\n".join(turns)
+    return rendered, size

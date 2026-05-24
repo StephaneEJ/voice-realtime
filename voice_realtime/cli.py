@@ -638,6 +638,16 @@ def talk(
         "--persona",
         help="Persona slug (e.g. 'jarvis', 'hormozi', 'coach-halt'). When set, the persona's system prompt + voice + VAD + model override the inline defaults, and persona.obsidian_skills/notes are merged into the system prompt as 'active knowledge'. List with: voice-realtime persona list",
     ),
+    rolling_terminal: bool = typer.Option(
+        False,
+        "--rolling-terminal/--no-rolling-terminal",
+        help="Periodically inject the new Claude Code transcript content (delta-only) as a silent note so the voice persona stays aware of what you're discussing in the terminal during the session. Requires --claude-context (-k). Default: off.",
+    ),
+    terminal_interval: float = typer.Option(
+        300.0,
+        "--terminal-interval",
+        help="Seconds between rolling-terminal injections (default 300 = 5 min). Min throttle: actual check runs every interval/4 but only emits when there's >= 600 new chars.",
+    ),
 ) -> None:
     """M2-M4: duplex audio session with context injection, cost tracking, vault save."""
     try:
@@ -742,6 +752,9 @@ def talk(
             vad=vad,
             persona_slug=(persona_obj.slug if persona_obj else None),
             greeting_mode=(persona_obj.greeting_mode if persona_obj else "persona"),
+            rolling_terminal=rolling_terminal,
+            terminal_recap_interval=terminal_interval,
+            cli_context_on=cli_context,
         )
     )
 
@@ -767,6 +780,9 @@ async def _run_talk(
     vad: str = "balanced",
     persona_slug: str | None = None,
     greeting_mode: str = "persona",
+    rolling_terminal: bool = False,
+    terminal_recap_interval: float = 300.0,
+    cli_context_on: bool = False,
 ) -> None:
     # Lazy import audio to avoid PortAudio errors at module load
     from .audio.microphone import MicrophoneStream
@@ -887,8 +903,26 @@ async def _run_talk(
     connected = True  # impl.connect() has returned successfully above
 
     # Rolling recap : tracks turns + transcripts between auto-injected recaps.
-    from .rolling_recap import RecapState, maybe_run_recap
+    from .rolling_recap import RecapState, maybe_run_recap, TerminalRecapState, maybe_inject_terminal_delta
     recap_state = RecapState() if rolling_recap else None
+
+    # Rolling terminal context (Phase 3.H): periodically inject the new
+    # Claude Code conversation content since the last absorption. Only
+    # engaged when --rolling-terminal was passed AND cli_context is on
+    # (otherwise the persona has no transcript to follow up on).
+    terminal_state = None
+    if rolling_terminal and cli_context_on:
+        from .cli_context import detect_source, jsonl_size_bytes
+        det = detect_source()
+        if det is not None:
+            _src, _handle = det
+            terminal_state = TerminalRecapState(
+                source_handle=_handle,
+                last_offset_bytes=jsonl_size_bytes(_handle),  # start from "now" — only new content matters
+            )
+            logger.info("rolling-terminal armed on source=%s offset=%d", _src.name, terminal_state.last_offset_bytes)
+        else:
+            logger.warning("rolling-terminal requested but no active CLI session detected — disabled")
 
     def _vu_bar(level: float, width: int = 28) -> str:
         scaled = min(1.0, level * 4.5)  # speech RMS ~0.05-0.2 maps to 0.2-0.9 bar
@@ -1148,11 +1182,42 @@ async def _run_talk(
                     logger.warning("send_silent_note failed: %r", exc)
             await asyncio.sleep(30.0)
 
+    async def _terminal_pump() -> None:
+        """Periodically read the new Claude Code transcript delta and inject
+        as a silent note. Lets the voice persona stay aware of whatever the
+        user just discussed with Claude Code in the terminal during the
+        ongoing voice session.
+        """
+        if terminal_state is None:
+            return
+        # Check less often than the audio recap — the terminal moves slower.
+        check_interval = max(60.0, terminal_recap_interval / 4.0)
+        while not stop_event.is_set():
+            try:
+                delta = await maybe_inject_terminal_delta(
+                    terminal_state, interval_seconds=terminal_recap_interval,
+                )
+            except Exception as exc:
+                logger.warning("terminal delta compute failed: %r", exc)
+                delta = None
+            if delta:
+                try:
+                    await impl.send_silent_note(delta)
+                    logger.info(
+                        "rolling-terminal injection #%d (delta %d chars, offset=%d)",
+                        terminal_state.injection_count,
+                        len(delta), terminal_state.last_offset_bytes,
+                    )
+                except Exception as exc:
+                    logger.warning("send_silent_note (terminal) failed: %r", exc)
+            await asyncio.sleep(check_interval)
+
     mic_task = asyncio.create_task(_mic_pump())
     recv_task = asyncio.create_task(_recv_pump())
     cost_task = asyncio.create_task(_cost_monitor())
     vu_task = asyncio.create_task(_vu_pump())
     recap_task = asyncio.create_task(_recap_pump()) if recap_state is not None else None
+    terminal_task = asyncio.create_task(_terminal_pump()) if terminal_state is not None else None
 
     await stop_event.wait()
 
@@ -1192,9 +1257,13 @@ async def _run_talk(
     vu_task.cancel()
     if recap_task is not None:
         recap_task.cancel()
+    if terminal_task is not None:
+        terminal_task.cancel()
     pending = [mic_task, recv_task, cost_task, vu_task]
     if recap_task is not None:
         pending.append(recap_task)
+    if terminal_task is not None:
+        pending.append(terminal_task)
     await asyncio.gather(*pending, return_exceptions=True)
 
     await player.drain(timeout=5.0)
