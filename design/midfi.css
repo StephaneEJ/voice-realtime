@@ -1,0 +1,538 @@
+/* ─────────────────────────────────────────────────────────────
+   midfi.css — mid-fidelity visual system for voice realtime
+   Warm dark · SF Pro / JetBrains Mono · accent #4fc3f7 (warn #ffb74d)
+   Real spacing scale, real radii, no sketchy wobble.
+   Every class prefixed .mf-* to coexist with the wireframe system.
+   ───────────────────────────────────────────────────────────── */
+
+:root {
+  /* Warm dark base */
+  --mf-bg:        #14161b;       /* page bg */
+  --mf-panel:     #1a1d23;       /* popover / modal */
+  --mf-panel-2:   #20242c;       /* nested boxes */
+  --mf-panel-3:   #262b34;       /* inputs / hover */
+  --mf-border:    rgba(255,255,255,0.06);
+  --mf-border-2:  rgba(255,255,255,0.10);
+  --mf-stroke:    rgba(255,255,255,0.14);
+
+  --mf-fg:        #ecedef;
+  --mf-fg-2:      #c4c7cd;
+  --mf-dim:       #8d929c;
+  --mf-mute:      #5c6068;
+
+  --mf-acc:       #4fc3f7;
+  --mf-acc-2:     #29b3f3;       /* hover/strong */
+  --mf-acc-soft:  rgba(79, 195, 247, 0.14);
+  --mf-acc-glow:  rgba(79, 195, 247, 0.35);
+
+  --mf-warn:      #ffb74d;
+  --mf-warn-soft: rgba(255, 183, 77, 0.14);
+  --mf-danger:    #ff7676;
+  --mf-danger-soft: rgba(255, 118, 118, 0.14);
+  --mf-ok:        #80e27e;
+  --mf-ok-soft:   rgba(128, 226, 126, 0.14);
+
+  --mf-sans:  -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
+  --mf-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
+  --mf-mono:  "JetBrains Mono", "SF Mono", ui-monospace, "Menlo", monospace;
+
+  /* Per-persona accent colors (for avatars / chips) */
+  --pa-aria: #ff8a7a;
+  --pa-koda: #4fc3f7;
+  --pa-mira: #c084fc;
+  --pa-noor: #5eead4;
+  --pa-zen:  #a3e635;
+  --pa-fox:  #ffb74d;
+}
+
+/* ── Frame ─────────────────────────────────────────────────── */
+.mf, .mf *, .mf *::before, .mf *::after { box-sizing: border-box; }
+
+.mf {
+  width: 100%; height: 100%;
+  background: var(--mf-panel);
+  color: var(--mf-fg);
+  font-family: var(--mf-sans);
+  font-size: 13px;
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+  border-radius: 12px;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--mf-border);
+}
+
+/* Popover variant — anchored under menubar, with caret + soft shadow */
+.mf.popover {
+  border-radius: 14px;
+  background: linear-gradient(180deg, var(--mf-panel) 0%, var(--mf-bg) 100%);
+  box-shadow:
+    0 1px 0 var(--mf-border-2) inset,
+    0 16px 50px rgba(0,0,0,0.55),
+    0 0 0 1px rgba(0,0,0,0.5);
+}
+
+/* macOS-y traffic light caret strip (cosmetic, top center) */
+.mf .mf-caret {
+  position: absolute;
+  top: -7px;
+  left: 50%; transform: translateX(-50%) rotate(45deg);
+  width: 14px; height: 14px;
+  background: var(--mf-panel);
+  border-top: 1px solid var(--mf-border-2);
+  border-left: 1px solid var(--mf-border-2);
+}
+.mf .mf-caret.left  { left: 30px; transform: rotate(45deg); }
+.mf .mf-caret.right { left: auto; right: 30px; transform: rotate(45deg); }
+
+/* ── Type scale ────────────────────────────────────────────── */
+.mf-display {
+  font-family: var(--mf-display);
+  font-size: 22px; font-weight: 600;
+  letter-spacing: -0.018em;
+  line-height: 1.15;
+  color: var(--mf-fg);
+}
+.mf-title    { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; color: var(--mf-fg); }
+.mf-subtitle { font-size: 13px; font-weight: 500; color: var(--mf-fg-2); }
+.mf-body     { font-size: 13px; color: var(--mf-fg-2); }
+.mf-label    { font-size: 11px; font-weight: 500; color: var(--mf-dim); letter-spacing: 0.02em; text-transform: uppercase; }
+.mf-cap      { font-size: 11px; color: var(--mf-dim); }
+.mf-mono     { font-family: var(--mf-mono); font-size: 11px; letter-spacing: 0; }
+.mf-mono-12  { font-family: var(--mf-mono); font-size: 12px; }
+
+.mf-acc      { color: var(--mf-acc); }
+.mf-warn     { color: var(--mf-warn); }
+.mf-danger   { color: var(--mf-danger); }
+.mf-ok       { color: var(--mf-ok); }
+.mf-dim      { color: var(--mf-dim); }
+.mf-mute     { color: var(--mf-mute); }
+
+/* ── Layout helpers ────────────────────────────────────────── */
+.mf-row { display: flex; align-items: center; gap: 8px; }
+.mf-col { display: flex; flex-direction: column; gap: 8px; }
+.mf-between { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mf-grow { flex: 1 1 0; min-width: 0; }
+
+/* ── Header (popover top strip) ────────────────────────────── */
+.mf-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--mf-border);
+  background: rgba(255,255,255,0.015);
+}
+
+/* ── Persona switcher (in header) ──────────────────────────── */
+.mf-switcher {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 4px 8px 4px 5px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background 0.12s;
+}
+.mf-switcher:hover { background: var(--mf-panel-3); }
+.mf-switcher .mf-chev { color: var(--mf-mute); font-size: 10px; margin-left: 2px; }
+
+/* ── Avatar ────────────────────────────────────────────────── */
+.mf-av {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--mf-display);
+  font-weight: 600;
+  color: rgba(0,0,0,0.85);
+  border-radius: 50%;
+  flex-shrink: 0;
+  position: relative;
+}
+.mf-av.sm  { width: 22px; height: 22px; font-size: 11px; }
+.mf-av.md  { width: 32px; height: 32px; font-size: 13px; }
+.mf-av.lg  { width: 48px; height: 48px; font-size: 18px; }
+.mf-av.xl  { width: 80px; height: 80px; font-size: 28px; }
+.mf-av.xxl { width: 112px; height: 112px; font-size: 42px; }
+
+/* persona-specific tints */
+.mf-av.aria { background: var(--pa-aria); }
+.mf-av.koda { background: var(--pa-koda); }
+.mf-av.mira { background: var(--pa-mira); }
+.mf-av.noor { background: var(--pa-noor); }
+.mf-av.zen  { background: var(--pa-zen);  }
+.mf-av.fox  { background: var(--pa-fox);  }
+
+/* live ring (pulse / listening) */
+.mf-av.live::after {
+  content: '';
+  position: absolute; inset: -6px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  opacity: 0.35;
+  animation: mf-pulse 1.6s ease-out infinite;
+}
+.mf-av.aria.live::after { color: var(--pa-aria); }
+.mf-av.koda.live::after { color: var(--pa-koda); }
+.mf-av.mira.live::after { color: var(--pa-mira); }
+.mf-av.noor.live::after { color: var(--pa-noor); }
+.mf-av.zen.live::after  { color: var(--pa-zen);  }
+.mf-av.fox.live::after  { color: var(--pa-fox);  }
+
+@keyframes mf-pulse {
+  0%   { transform: scale(1);    opacity: 0.45; }
+  70%  { transform: scale(1.18); opacity: 0;    }
+  100% { transform: scale(1.18); opacity: 0;    }
+}
+
+/* ── Chips ─────────────────────────────────────────────────── */
+.mf-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 22px; padding: 0 8px;
+  border-radius: 6px;
+  font-size: 11px; font-weight: 500;
+  background: var(--mf-panel-3);
+  color: var(--mf-fg-2);
+  white-space: nowrap;
+}
+.mf-chip.acc    { background: var(--mf-acc-soft);    color: var(--mf-acc); }
+.mf-chip.warn   { background: var(--mf-warn-soft);   color: var(--mf-warn); }
+.mf-chip.danger { background: var(--mf-danger-soft); color: var(--mf-danger); }
+.mf-chip.ok     { background: var(--mf-ok-soft);     color: var(--mf-ok); }
+.mf-chip.outline { background: transparent; border: 1px solid var(--mf-border-2); }
+.mf-chip.live   { padding-left: 6px; }
+.mf-chip.live::before {
+  content: '';
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--mf-ok);
+  box-shadow: 0 0 6px var(--mf-ok);
+  animation: mf-blink 1.4s ease-in-out infinite;
+}
+@keyframes mf-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+/* ── Buttons ───────────────────────────────────────────────── */
+.mf-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-family: var(--mf-sans); font-size: 13px; font-weight: 500;
+  color: var(--mf-fg);
+  background: var(--mf-panel-3);
+  border: 1px solid var(--mf-border-2);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, transform 0.08s;
+}
+.mf-btn:hover { background: rgba(255,255,255,0.08); border-color: var(--mf-stroke); }
+.mf-btn:active { transform: scale(0.98); }
+
+.mf-btn.primary {
+  background: var(--mf-acc);
+  color: #04131c;
+  border-color: transparent;
+  font-weight: 600;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.4) inset, 0 4px 14px var(--mf-acc-glow);
+}
+.mf-btn.primary:hover { background: var(--mf-acc-2); }
+
+.mf-btn.danger {
+  background: transparent;
+  border-color: rgba(255,118,118,0.5);
+  color: var(--mf-danger);
+}
+.mf-btn.danger:hover { background: var(--mf-danger-soft); }
+
+.mf-btn.ghost {
+  background: transparent;
+  border-color: var(--mf-border-2);
+  color: var(--mf-fg-2);
+}
+.mf-btn.ghost:hover { background: rgba(255,255,255,0.04); }
+
+.mf-btn.lg { height: 38px; padding: 0 18px; font-size: 14px; font-weight: 600; border-radius: 10px; }
+
+.mf-btn.block { width: 100%; }
+
+/* Icon button (square) */
+.mf-icn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--mf-fg-2);
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.12s;
+}
+.mf-icn:hover { background: var(--mf-panel-3); color: var(--mf-fg); }
+.mf-icn.sm { width: 22px; height: 22px; font-size: 12px; border-radius: 5px; }
+.mf-icn.lg { width: 38px; height: 38px; font-size: 18px; border-radius: 9px; }
+
+/* ── Talk button — the big central one ─────────────────────── */
+.mf-talk {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 88px; height: 88px;
+  border-radius: 50%;
+  background: var(--mf-acc);
+  color: #04131c;
+  border: none;
+  cursor: pointer;
+  font-size: 24px;
+  font-weight: 600;
+  position: relative;
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.5) inset,
+    0 8px 28px var(--mf-acc-glow),
+    0 0 0 6px rgba(79,195,247,0.10);
+  transition: transform 0.12s ease, box-shadow 0.15s;
+}
+.mf-talk:hover { transform: scale(1.03); }
+.mf-talk:active { transform: scale(0.98); }
+.mf-talk.sm { width: 56px; height: 56px; font-size: 18px; box-shadow: 0 1px 0 rgba(255,255,255,0.4) inset, 0 4px 18px var(--mf-acc-glow); }
+.mf-talk.lg { width: 110px; height: 110px; font-size: 30px; }
+
+.mf-talk.stop {
+  background: transparent;
+  border: 2px solid var(--mf-danger);
+  color: var(--mf-danger);
+  box-shadow: 0 0 0 6px var(--mf-danger-soft);
+}
+.mf-talk.stop:hover { background: var(--mf-danger-soft); }
+
+.mf-talk.connecting {
+  background: var(--mf-warn);
+  color: #1c1300;
+  box-shadow: 0 0 0 6px var(--mf-warn-soft);
+}
+
+/* ── Inputs (boxes) ────────────────────────────────────────── */
+.mf-input {
+  display: flex; align-items: center;
+  height: 30px; padding: 0 10px;
+  background: var(--mf-bg);
+  border: 1px solid var(--mf-border-2);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--mf-fg);
+  font-family: inherit;
+  width: 100%;
+}
+.mf-input:focus-within { border-color: var(--mf-acc); box-shadow: 0 0 0 3px var(--mf-acc-soft); }
+.mf-input.mono { font-family: var(--mf-mono); font-size: 11.5px; color: var(--mf-fg-2); letter-spacing: 0; }
+
+/* ── Cards / blocks ────────────────────────────────────────── */
+.mf-card {
+  background: var(--mf-panel-2);
+  border: 1px solid var(--mf-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.mf-card.hover { transition: background 0.12s, border-color 0.12s; }
+.mf-card.hover:hover { background: var(--mf-panel-3); border-color: var(--mf-border-2); }
+.mf-card.selected { border-color: var(--mf-acc); background: var(--mf-acc-soft); }
+
+.mf-divider { height: 1px; background: var(--mf-border); margin: 0; }
+
+/* ── Bubbles (transcript) ──────────────────────────────────── */
+.mf-bub {
+  font-size: 13px; line-height: 1.42;
+  padding: 7px 11px;
+  border-radius: 12px;
+  max-width: 84%;
+  word-wrap: break-word;
+}
+.mf-bub.user  {
+  background: var(--mf-acc); color: #04131c;
+  margin-left: auto; border-bottom-right-radius: 4px;
+  font-weight: 500;
+}
+.mf-bub.model {
+  background: var(--mf-panel-2); color: var(--mf-fg);
+  border: 1px solid var(--mf-border);
+  border-bottom-left-radius: 4px;
+}
+.mf-bub.partial { opacity: 0.65; font-style: italic; }
+
+/* ── Toggles (iOS-style switch) ────────────────────────────── */
+.mf-switch {
+  display: inline-block;
+  width: 36px; height: 20px;
+  border-radius: 999px;
+  background: var(--mf-panel-3);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.16s;
+  flex-shrink: 0;
+}
+.mf-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+  transition: left 0.16s;
+}
+.mf-switch.on { background: var(--mf-acc); }
+.mf-switch.on::after { left: 18px; }
+
+/* ── Sliders ───────────────────────────────────────────────── */
+.mf-slider {
+  position: relative;
+  height: 18px;
+  display: flex; align-items: center;
+}
+.mf-slider .track {
+  height: 4px; border-radius: 999px;
+  background: var(--mf-panel-3);
+  width: 100%;
+  position: relative;
+}
+.mf-slider .fill {
+  position: absolute; top: 0; bottom: 0; left: 0;
+  background: var(--mf-acc);
+  border-radius: 999px;
+}
+.mf-slider .knob {
+  position: absolute;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  top: 50%; transform: translate(-50%, -50%);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+}
+
+/* ── Progress bar ──────────────────────────────────────────── */
+.mf-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--mf-panel-3);
+  overflow: hidden;
+  position: relative;
+}
+.mf-bar > i { display: block; height: 100%; background: var(--mf-acc); border-radius: 999px; }
+.mf-bar.warn > i { background: var(--mf-warn); }
+.mf-bar.danger > i { background: var(--mf-danger); }
+
+/* Stacked bar (multi-segment) — for context budget */
+.mf-bar.stacked > i {
+  position: absolute; top: 0; height: 100%;
+}
+
+/* ── VU bars / waveform / radial ───────────────────────────── */
+.mf-vu-bars {
+  display: flex; align-items: center; gap: 2px;
+  height: 28px; width: 100%;
+}
+.mf-vu-bars i {
+  flex: 1 1 0;
+  background: var(--mf-acc);
+  border-radius: 1.5px;
+  min-height: 3px;
+}
+.mf-vu-bars.user i  { background: var(--mf-acc); }
+.mf-vu-bars.model i { background: var(--mf-fg-2); }
+.mf-vu-bars.md { height: 40px; }
+.mf-vu-bars.lg { height: 56px; }
+
+.mf-vu-wave { width: 100%; height: 36px; }
+.mf-vu-wave svg { width: 100%; height: 100%; display: block; }
+.mf-vu-wave path { fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.mf-vu-wave .u { stroke: var(--mf-acc); }
+.mf-vu-wave .m { stroke: var(--mf-fg-2); opacity: 0.8; }
+
+.mf-radial { position: relative; display: inline-flex; align-items: center; justify-content: center; }
+.mf-radial svg { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
+.mf-radial line { stroke: var(--mf-acc); stroke-width: 2.5; stroke-linecap: round; }
+.mf-radial line.m { stroke: var(--mf-fg-2); opacity: 0.55; }
+
+/* ── Settings tab list (vertical, left rail) ───────────────── */
+.mf-tabs {
+  display: flex; flex-direction: column; gap: 2px;
+  width: 156px; flex-shrink: 0;
+  padding: 8px;
+  border-right: 1px solid var(--mf-border);
+  background: rgba(255,255,255,0.015);
+}
+.mf-tab {
+  display: flex; align-items: center; gap: 9px;
+  height: 28px; padding: 0 9px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--mf-fg-2);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.mf-tab:hover { background: var(--mf-panel-3); color: var(--mf-fg); }
+.mf-tab.active { background: var(--mf-acc-soft); color: var(--mf-acc); font-weight: 500; }
+.mf-tab .mf-tab-ico { font-size: 14px; width: 16px; text-align: center; opacity: 0.85; }
+
+/* Sub-tabs (horizontal) — for persona editor */
+.mf-subtabs {
+  display: flex; gap: 2px;
+  padding: 3px;
+  background: var(--mf-bg);
+  border-radius: 9px;
+  border: 1px solid var(--mf-border);
+}
+.mf-subtab {
+  flex: 1;
+  height: 26px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 6px;
+  font-size: 12.5px; font-weight: 500;
+  color: var(--mf-dim);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.mf-subtab:hover { color: var(--mf-fg-2); }
+.mf-subtab.active { background: var(--mf-panel-3); color: var(--mf-fg); }
+
+/* ── Sparkline ─────────────────────────────────────────────── */
+.mf-spark { width: 100%; height: 26px; }
+.mf-spark .stroke { fill: none; stroke: var(--mf-acc); stroke-width: 1.4; }
+.mf-spark .fill { fill: var(--mf-acc-soft); stroke: none; }
+
+/* ── kbd ───────────────────────────────────────────────────── */
+.mf-kbd {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 4px;
+  border-radius: 4px;
+  background: var(--mf-panel-3);
+  border: 1px solid var(--mf-border-2);
+  font-family: var(--mf-mono);
+  font-size: 10.5px;
+  color: var(--mf-fg-2);
+}
+
+/* ── Banners (edge cases) ──────────────────────────────────── */
+.mf-banner {
+  padding: 10px 12px;
+  border-radius: 9px;
+  display: flex; align-items: flex-start; gap: 9px;
+  font-size: 12.5px;
+  border: 1px solid;
+}
+.mf-banner.warn   { background: var(--mf-warn-soft);   border-color: rgba(255,183,77,0.3); color: var(--mf-warn); }
+.mf-banner.danger { background: var(--mf-danger-soft); border-color: rgba(255,118,118,0.3); color: var(--mf-danger); }
+.mf-banner.info   { background: var(--mf-acc-soft);    border-color: rgba(79,195,247,0.3);  color: var(--mf-acc); }
+.mf-banner .mf-banner-icn { font-size: 14px; line-height: 1; flex-shrink: 0; padding-top: 1px; }
+
+/* hide scrollbars */
+.mf *::-webkit-scrollbar { display: none; }
+.mf * { scrollbar-width: none; }
+
+/* terminal context shade (for overlay) */
+.mf-term {
+  background: linear-gradient(180deg, #0c0e12 0%, #0a0b0e 100%);
+  font-family: var(--mf-mono);
+  font-size: 10.5px;
+  color: #6b7280;
+  line-height: 1.65;
+  padding: 10px 14px;
+  position: relative;
+}
+.mf-term .ln-prompt { color: var(--mf-acc); }
+.mf-term .ln-out    { color: #8b9099; }
+.mf-term .ln-evt    { color: var(--mf-warn); }
