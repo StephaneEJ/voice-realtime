@@ -113,7 +113,90 @@ app = typer.Typer(
     add_completion=False,
     help="Duplex realtime voice skill. Multi-provider (Gemini Live + OpenAI Realtime-2).",
 )
+persona_app = typer.Typer(
+    add_completion=False,
+    help="Persona management (list, show, new).",
+)
+app.add_typer(persona_app, name="persona")
 console = Console()
+
+
+@persona_app.command("list")
+def persona_list() -> None:
+    """List available personas in the vault."""
+    from .persona import list_personas, get_personas_dir
+
+    personas = list_personas()
+    if not personas:
+        console.print(f"[yellow]No personas found in {get_personas_dir()}[/yellow]")
+        console.print("[dim]Create one with: voice-realtime persona new <slug>[/dim]")
+        raise typer.Exit(0)
+
+    from rich.table import Table
+    table = Table(title="Available personas", title_style="cyan", show_lines=False)
+    table.add_column("Slug", style="cyan")
+    table.add_column("Name", style="bold")
+    table.add_column("Voice")
+    table.add_column("VAD")
+    table.add_column("Provider")
+    table.add_column("Skills")
+    table.add_column("Description", style="dim")
+    for p in personas:
+        skills_n = f"{len(p.obsidian_skills)}+{len(p.obsidian_notes)}" if p.has_obsidian_filter else "—"
+        table.add_row(
+            p.slug,
+            p.name,
+            p.voice or "—",
+            p.vad or "—",
+            p.provider or "—",
+            skills_n,
+            p.description or "",
+        )
+    console.print(table)
+
+
+@persona_app.command("show")
+def persona_show(slug: str = typer.Argument(..., help="Persona slug")) -> None:
+    """Show a persona's frontmatter + system prompt + resolved knowledge block."""
+    from .persona import load_persona_by_slug, PersonaError
+    from .persona_skills import build_persona_knowledge_block, report_missing_references
+
+    try:
+        p = load_persona_by_slug(slug)
+    except PersonaError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+    console.print(Panel(
+        f"[bold]{p.name}[/bold] ({p.slug})\n"
+        f"{p.description}\n\n"
+        f"Voice: {p.voice or 'default'}\n"
+        f"Model: {p.model or 'default'}\n"
+        f"Provider: {p.provider or 'default'}\n"
+        f"VAD: {p.vad or 'default'}\n"
+        f"Creativity: {p.creativity or 'default'}\n"
+        f"Greeting: {p.greeting_mode} ({p.greeting_text or '—'})\n"
+        f"Skills: {', '.join(p.obsidian_skills) or 'none'}\n"
+        f"Notes: {', '.join(p.obsidian_notes) or 'none'}\n"
+        f"Source: {p.source_path}",
+        title="Persona", border_style="cyan",
+    ))
+    console.print(Panel(p.system_prompt, title="System prompt", border_style="dim"))
+
+    if p.has_obsidian_filter:
+        missing_skills, missing_notes = report_missing_references(p)
+        if missing_skills or missing_notes:
+            warn = []
+            if missing_skills:
+                warn.append(f"Missing skills (typos?): {', '.join(missing_skills)}")
+            if missing_notes:
+                warn.append(f"No matching notes: {', '.join(missing_notes)}")
+            console.print(Panel("\n".join(warn), title="Warnings", border_style="yellow"))
+        block = build_persona_knowledge_block(p)
+        console.print(Panel(
+            f"{len(block)} chars total — preview:\n\n{block[:1500]}{'…' if len(block) > 1500 else ''}",
+            title="Knowledge block (vault filter)", border_style="green",
+        ))
 
 
 @app.command()
@@ -443,6 +526,11 @@ def talk(
         "--vad",
         help="VAD sensitivity preset: reactive | balanced | patient | very-patient. Controls how easily the server interrupts the model on ambient noise. Pick 'patient' or 'very-patient' in noisy environments (default: balanced).",
     ),
+    persona: str = typer.Option(
+        "",
+        "--persona",
+        help="Persona slug (e.g. 'jarvis', 'hormozi', 'coach-halt'). When set, the persona's system prompt + voice + VAD + model override the inline defaults, and persona.obsidian_skills/notes are merged into the system prompt as 'active knowledge'. List with: voice-realtime persona list",
+    ),
 ) -> None:
     """M2-M4: duplex audio session with context injection, cost tracking, vault save."""
     try:
@@ -450,6 +538,33 @@ def talk(
     except FileNotFoundError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
+
+    # Resolve persona first — its fields take precedence over CLI defaults
+    # for provider/model/voice/vad. Explicit CLI flags (when the user passed
+    # them) still win over the persona's frontmatter.
+    persona_obj = None
+    persona_knowledge = ""
+    if persona:
+        from .persona import load_persona_by_slug, PersonaError
+        from .persona_skills import build_persona_knowledge_block
+        try:
+            persona_obj = load_persona_by_slug(persona)
+        except PersonaError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1)
+        # Apply persona overrides only when the CLI value is the default —
+        # detect "user didn't pass it" by checking against the typer defaults.
+        # `provider` default is "gemini", `voice` is "", `model` is "", `vad`
+        # is "balanced". Persona overrides ONLY default values.
+        if persona_obj.provider and provider == "gemini":
+            provider = persona_obj.provider
+        if persona_obj.model and not model:
+            model = persona_obj.model
+        if persona_obj.voice and not voice:
+            voice = persona_obj.voice
+        if persona_obj.vad and vad == "balanced":
+            vad = persona_obj.vad
+        persona_knowledge = build_persona_knowledge_block(persona_obj)
 
     if provider == "openai":
         if not cfg.has_openai:
@@ -467,23 +582,29 @@ def talk(
         console.print(f"[red]Unknown provider: {provider}[/red]")
         raise typer.Exit(1)
 
-    # Build context-injected system prompt
-    base_prompt = (
-        "Tu es Jarvis voice — un partenaire de brainstorming pour Stéphane Dufresne. "
-        "Tu réponds en français, naturellement, comme une conversation. "
-        "Tu n'es ni flatteur ni servile. Tu challenges quand c'est utile. "
-        "Tu vas droit au but, sans préambule.\n\n"
-        "OUVERTURE OBLIGATOIRE : Quand tu reçois le mot-clé « Démarre. » comme premier "
-        "message (signal de démarrage de session, ce n'est PAS une vraie question de "
-        "Stéphane), tu réponds UNIQUEMENT et EXCLUSIVEMENT par cette phrase courte : "
-        "« Salut Stéphane, je suis connecté, je t'écoute. » — RIEN d'autre. Pas de "
-        "récap projet, pas de Phase 2, pas de questions, pas de proposition. Tu dis "
-        "juste cette phrase puis tu te tais et tu attends sa première vraie question.\n\n"
-        "NOTES DE CONTEXTE SILENCIEUSES : Si tu reçois un message commençant par "
-        "« [Note système — rappel contexte conversation, NE RÉPONDS PAS, absorbe "
-        "seulement] », c'est un récap automatique de ce qui vient d'être dit. Tu "
-        "l'absorbes en mémoire SANS répondre. Tu attends que Stéphane parle ensuite."
-    )
+    # Build context-injected system prompt — persona's prompt replaces the
+    # inline default when --persona is set.
+    if persona_obj is not None:
+        base_prompt = persona_obj.system_prompt
+        if persona_knowledge:
+            base_prompt = base_prompt + "\n\n" + persona_knowledge
+    else:
+        base_prompt = (
+            "Tu es Jarvis voice — un partenaire de brainstorming pour Stéphane Dufresne. "
+            "Tu réponds en français, naturellement, comme une conversation. "
+            "Tu n'es ni flatteur ni servile. Tu challenges quand c'est utile. "
+            "Tu vas droit au but, sans préambule.\n\n"
+            "OUVERTURE OBLIGATOIRE : Quand tu reçois le mot-clé « Démarre. » comme premier "
+            "message (signal de démarrage de session, ce n'est PAS une vraie question de "
+            "Stéphane), tu réponds UNIQUEMENT et EXCLUSIVEMENT par cette phrase courte : "
+            "« Salut Stéphane, je suis connecté, je t'écoute. » — RIEN d'autre. Pas de "
+            "récap projet, pas de Phase 2, pas de questions, pas de proposition. Tu dis "
+            "juste cette phrase puis tu te tais et tu attends sa première vraie question.\n\n"
+            "NOTES DE CONTEXTE SILENCIEUSES : Si tu reçois un message commençant par "
+            "« [Note système — rappel contexte conversation, NE RÉPONDS PAS, absorbe "
+            "seulement] », c'est un récap automatique de ce qui vient d'être dit. Tu "
+            "l'absorbes en mémoire SANS répondre. Tu attends que Stéphane parle ensuite."
+        )
     ctx = build_context(project_hint=project or None, include_cli=cli_context)
     if ctx:
         system_prompt = base_prompt + "\n\n# Contexte vault (utilise si pertinent)\n\n" + ctx
@@ -512,6 +633,8 @@ def talk(
             recap_user_chars=recap_user_chars,
             mic_rate_override=mic_rate or None,
             vad=vad,
+            persona_slug=(persona_obj.slug if persona_obj else None),
+            greeting_mode=(persona_obj.greeting_mode if persona_obj else "persona"),
         )
     )
 
@@ -535,6 +658,8 @@ async def _run_talk(
     recap_user_chars: int = 2500,
     mic_rate_override: int | None = None,
     vad: str = "balanced",
+    persona_slug: str | None = None,
+    greeting_mode: str = "persona",
 ) -> None:
     # Lazy import audio to avoid PortAudio errors at module load
     from .audio.microphone import MicrophoneStream
@@ -583,12 +708,14 @@ async def _run_talk(
 
     header_text = (
         f"Provider: {provider_name} / {model}\n"
+        f"Persona: {persona_slug or 'jarvis (inline default)'}\n"
         f"Project context: {project_hint or 'none'}\n"
         f"Mic rate: {input_rate} Hz\n"
         f"VAD preset: {vad}\n"
+        f"Greeting mode: {greeting_mode}\n"
         f"Max duration: {max_minutes:.0f} min\n"
         f"Cost cap: ${cost_cap:.2f}\n"
-        f"Ctrl+C to stop."
+        f"Ctrl+C / 'termine la session' to stop."
     )
     _panel(header_text, title="voice-realtime talk", border_style="cyan")
 
@@ -624,10 +751,15 @@ async def _run_talk(
     # Greeting kick : Gemini Live native-audio server VAD won't emit a first
     # turn until it detects user speech. We send a tiny text trigger so the
     # model delivers the obligatory greeting immediately, without waiting.
-    try:
-        await impl.send_text("Démarre.")
-    except Exception as exc:
-        logger.warning("greeting kick failed (non-fatal): %r", exc)
+    # Personas with greeting_mode="user" expect to wait silently for Stéphane
+    # to speak first (e.g. interview personas) — skip the kick in that case.
+    if greeting_mode == "persona":
+        try:
+            await impl.send_text("Démarre.")
+        except Exception as exc:
+            logger.warning("greeting kick failed (non-fatal): %r", exc)
+    else:
+        logger.info("greeting_mode=user — skipping kick, waiting for user to speak first")
 
     tracker = CostTracker(
         provider=provider_name,
