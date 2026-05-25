@@ -63,6 +63,17 @@ class Persona:
     # Capabilities the persona may invoke (informational; actual tool wiring
     # lives in voice_realtime/tools/)
     tools: list[str] = field(default_factory=list)
+    # Sprint 3 — context + safety presets
+    project: str | None = None  # vault project hint, equivalent to --project CLI flag
+    cli_context: bool = False   # equivalent to --cli-context (inject Claude Code transcript)
+    rolling_recap: bool = True  # rolling recap of conversation every N min
+    rolling_terminal: bool = False  # silent injection of new terminal content
+    web_allowlist: list[str] = field(default_factory=list)  # domains for web_search
+    ask_before_acting: bool = False  # gate WRITE_USER_SCOPE+ tool calls behind UI confirm
+    # Phrase → tool call recipes. Each item:
+    #   {"trigger": "capture this", "action": "vault_write(path=..., content=...)"}
+    # Free-form action string for now; future Sprint may parse into tool chains.
+    custom_commands: list[dict] = field(default_factory=list)
     # Provenance — populated by load_persona_file
     source_path: Path | None = None
 
@@ -104,6 +115,39 @@ def _coerce_list(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(x) for x in value if x is not None]
     raise PersonaError(f"Expected list or string, got {type(value).__name__}")
+
+
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    """YAML bool already True/False; tolerate strings like 'true'/'false' for
+    UI roundtrips where the editor wrote a string back.
+    """
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "yes", "1", "on")
+    return bool(value)
+
+
+def _coerce_command_list(value: Any) -> list[dict]:
+    """custom_commands: each entry must be a dict with 'trigger' and 'action'
+    keys. Anything else is dropped silently to avoid blowing up on malformed
+    UI writes — the editor is responsible for shape, not the loader.
+    """
+    if not value:
+        return []
+    if not isinstance(value, list):
+        return []
+    out: list[dict] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        trigger = str(item.get("trigger", "")).strip()
+        action = str(item.get("action", "")).strip()
+        if trigger and action:
+            out.append({"trigger": trigger, "action": action})
+    return out
 
 
 def load_persona_file(path: Path) -> Persona:
@@ -152,6 +196,13 @@ def load_persona_file(path: Path) -> Persona:
         obsidian_skills=_coerce_list(fm.get("obsidian_skills")),
         obsidian_notes=_coerce_list(fm.get("obsidian_notes")),
         tools=_coerce_list(fm.get("tools")),
+        project=(str(fm["project"]).strip() if fm.get("project") else None),
+        cli_context=_coerce_bool(fm.get("cli_context"), default=False),
+        rolling_recap=_coerce_bool(fm.get("rolling_recap"), default=True),
+        rolling_terminal=_coerce_bool(fm.get("rolling_terminal"), default=False),
+        web_allowlist=_coerce_list(fm.get("web_allowlist")),
+        ask_before_acting=_coerce_bool(fm.get("ask_before_acting"), default=False),
+        custom_commands=_coerce_command_list(fm.get("custom_commands")),
         source_path=path,
     )
 

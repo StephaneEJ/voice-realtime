@@ -27,7 +27,9 @@
       "identifier": "fs:scope",
       "allow": [
         { "path": "$HOME/OBSIDIAN/2ND_CERVEAU/_System/voice-personas" },
-        { "path": "$HOME/OBSIDIAN/2ND_CERVEAU/_System/voice-personas/*" }
+        { "path": "$HOME/OBSIDIAN/2ND_CERVEAU/_System/voice-personas/*" },
+        { "path": "$HOME/OBSIDIAN/2ND_CERVEAU" },
+        { "path": "$HOME/OBSIDIAN/2ND_CERVEAU/**" }
       ]
     }
   ]

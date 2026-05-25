@@ -2,9 +2,13 @@
 // vault. Replaces the Obsidian-redirect flow with direct fs writes via the
 // Tauri fs plugin (scoped to _System/voice-personas/ in capabilities).
 
+import { homeDir, join } from "@tauri-apps/api/path";
 import { useEffect, useState } from "react";
+import { FileTreePicker } from "../components/FileTreePicker";
+import { TagListInput } from "../components/TagListInput";
 import {
   PersonaFile,
+  PersonaCustomCommand,
   deletePersonaFile,
   emptyPersonaFile,
   personaExists,
@@ -57,6 +61,20 @@ export function PersonaEditorModal({
   const [error, setError] = useState<string | null>(null);
   const [touchedSlug, setTouchedSlug] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [vaultRoot, setVaultRoot] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Resolve vault root once for the FileTreePicker. Recompute is cheap but
+    // homeDir() is async — caching here keeps the picker render synchronous.
+    (async () => {
+      try {
+        const home = await homeDir();
+        setVaultRoot(await join(home, "OBSIDIAN/2ND_CERVEAU"));
+      } catch {
+        setVaultRoot(null);
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -341,6 +359,109 @@ export function PersonaEditorModal({
                 </Row>
               ) : null}
 
+              <Section title="Contexte" defaultOpen={Boolean(persona.project || persona.cliContext)}>
+                <Row label="Projet vault (--project)">
+                  <input
+                    type="text"
+                    value={persona.project}
+                    onChange={(e) => update("project", e.target.value)}
+                    placeholder="Voice Realtime"
+                    style={INPUT}
+                  />
+                  <span className="mf-cap mf-dim" style={{ marginTop: 4 }}>
+                    Partial match — la note projet correspondante est injectée dans le contexte.
+                  </span>
+                </Row>
+                <Row label=" ">
+                  <Toggle
+                    checked={persona.cliContext}
+                    onChange={(v) => update("cliContext", v)}
+                    label="Injecter contexte Claude Code (--cli-context)"
+                  />
+                </Row>
+                <Row label=" ">
+                  <Toggle
+                    checked={persona.rollingRecap}
+                    onChange={(v) => update("rollingRecap", v)}
+                    label="Rolling recap (recompacte les 7 dernières minutes périodiquement)"
+                  />
+                </Row>
+                <Row label=" ">
+                  <Toggle
+                    checked={persona.rollingTerminal}
+                    onChange={(v) => update("rollingTerminal", v)}
+                    label="Rolling terminal (injecte les nouvelles lignes Claude Code silencieusement)"
+                    disabled={!persona.cliContext}
+                    disabledHint="Requiert cli_context = on"
+                  />
+                </Row>
+              </Section>
+
+              <Section
+                title="Vault filter"
+                defaultOpen={persona.obsidianNotes.length > 0 || persona.obsidianSkills.length > 0}
+              >
+                <Row label="Notes vault (obsidian_notes)">
+                  {vaultRoot ? (
+                    <FileTreePicker
+                      rootPath={vaultRoot}
+                      selected={persona.obsidianNotes}
+                      onChange={(next) => update("obsidianNotes", next)}
+                    />
+                  ) : (
+                    <span className="mf-dim">Chargement du vault…</span>
+                  )}
+                  <span className="mf-cap mf-dim" style={{ marginTop: 4 }}>
+                    Coche dossiers/fichiers que la persona doit "connaître". Un dossier coché
+                    couvre toute son arborescence.
+                  </span>
+                </Row>
+                <Row label="Skills (obsidian_skills)">
+                  <TagListInput
+                    values={persona.obsidianSkills}
+                    onChange={(next) => update("obsidianSkills", next)}
+                    placeholder="slug skill (ex: hormozi-offer)"
+                    hint="Slugs sans .md — résolus via _System/skills/ ou .claude/skills/"
+                  />
+                </Row>
+              </Section>
+
+              <Section
+                title="Skills + safety"
+                defaultOpen={persona.tools.length > 0 || persona.askBeforeActing}
+              >
+                <Row label="Outils autorisés (tools)">
+                  <TagListInput
+                    values={persona.tools}
+                    onChange={(next) => update("tools", next)}
+                    placeholder="search_vault, vault_write, web_search, …"
+                    hint="Vide = aucun outil. Sinon le modèle peut appeler ces fonctions."
+                  />
+                </Row>
+                <Row label=" ">
+                  <Toggle
+                    checked={persona.askBeforeActing}
+                    onChange={(v) => update("askBeforeActing", v)}
+                    label="Demander confirmation avant chaque outil WRITE/DANGEROUS"
+                  />
+                </Row>
+                <Row label="Web allowlist (web_search)">
+                  <TagListInput
+                    values={persona.webAllowlist}
+                    onChange={(next) => update("webAllowlist", next)}
+                    placeholder="github.com, claude.ai, …"
+                    hint="Suffix match. Vide = tout autorisé pour web_search."
+                  />
+                </Row>
+              </Section>
+
+              <Section title="Custom commands" defaultOpen={persona.customCommands.length > 0}>
+                <CustomCommandsEditor
+                  value={persona.customCommands}
+                  onChange={(next) => update("customCommands", next)}
+                />
+              </Section>
+
               <Row label="System prompt">
                 <textarea
                   value={persona.systemPrompt}
@@ -458,6 +579,155 @@ export function PersonaEditorModal({
           )}
         </footer>
       </div>
+    </div>
+  );
+}
+
+function Section({
+  title,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div
+      style={{
+        border: "1px solid var(--mf-border)",
+        borderRadius: 8,
+        background: "var(--mf-panel-2)",
+        overflow: "hidden",
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          width: "100%",
+          textAlign: "left",
+          background: "transparent",
+          border: "none",
+          color: "var(--mf-fg)",
+          padding: "8px 12px",
+          fontSize: 12,
+          fontWeight: 600,
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <span>{title}</span>
+        <span style={{ color: "var(--mf-dim)", fontFamily: "var(--mf-mono)" }}>{open ? "▾" : "▸"}</span>
+      </button>
+      {open ? (
+        <div style={{ padding: "4px 12px 12px", display: "flex", flexDirection: "column", gap: 10 }}>
+          {children}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function Toggle({
+  checked,
+  onChange,
+  label,
+  disabled = false,
+  disabledHint,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label: string;
+  disabled?: boolean;
+  disabledHint?: string;
+}) {
+  return (
+    <label
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 8,
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.5 : 1,
+        fontSize: 12,
+        color: "var(--mf-fg)",
+      }}
+      title={disabled ? disabledHint : undefined}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+        style={{ accentColor: "var(--mf-acc)" }}
+      />
+      <span>{label}</span>
+    </label>
+  );
+}
+
+function CustomCommandsEditor({
+  value,
+  onChange,
+}: {
+  value: PersonaCustomCommand[];
+  onChange: (next: PersonaCustomCommand[]) => void;
+}) {
+  const update = (idx: number, patch: Partial<PersonaCustomCommand>) => {
+    const next = value.slice();
+    next[idx] = { ...next[idx], ...patch };
+    onChange(next);
+  };
+  const remove = (idx: number) => {
+    const next = value.slice();
+    next.splice(idx, 1);
+    onChange(next);
+  };
+  const add = () => {
+    onChange([...value, { trigger: "", action: "" }]);
+  };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {value.map((cmd, idx) => (
+        <div key={idx} style={{ display: "flex", gap: 6, alignItems: "stretch" }}>
+          <input
+            type="text"
+            value={cmd.trigger}
+            onChange={(e) => update(idx, { trigger: e.target.value })}
+            placeholder="trigger (ex: capture this)"
+            style={{ ...INPUT, flex: 1 }}
+          />
+          <input
+            type="text"
+            value={cmd.action}
+            onChange={(e) => update(idx, { action: e.target.value })}
+            placeholder="action (ex: vault_write(daily/today.md))"
+            style={{ ...INPUT, flex: 2, fontFamily: "var(--mf-mono)" }}
+          />
+          <button
+            type="button"
+            onClick={() => remove(idx)}
+            aria-label="Supprimer"
+            style={{
+              ...SECONDARY_BTN,
+              padding: "6px 10px",
+              color: "var(--mf-danger)",
+            }}
+          >
+            ×
+          </button>
+        </div>
+      ))}
+      <button type="button" onClick={add} style={{ ...SECONDARY_BTN, alignSelf: "flex-start" }}>
+        + Ajouter commande
+      </button>
+      <span className="mf-cap mf-dim">
+        Phrases qui déclenchent un outil. Sémantique pré-injectée dans le system prompt.
+      </span>
     </div>
   );
 }

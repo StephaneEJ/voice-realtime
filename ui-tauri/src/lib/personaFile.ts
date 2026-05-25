@@ -10,6 +10,12 @@ import { exists, readDir, readTextFile, remove, writeTextFile } from "@tauri-app
 import { homeDir, join } from "@tauri-apps/api/path";
 import type { Persona } from "./models";
 
+/** Sprint 3 custom command entry — phrase trigger → tool/action recipe. */
+export interface PersonaCustomCommand {
+  trigger: string;
+  action: string;
+}
+
 export interface PersonaFile {
   slug: string;
   name: string;
@@ -21,6 +27,22 @@ export interface PersonaFile {
   greetingMode: "persona" | "user";
   greetingText: string;
   systemPrompt: string;
+  // Sprint 3 — Vault filter (now first-class instead of extraFrontmatter)
+  obsidianSkills: string[];
+  obsidianNotes: string[];
+  // Sprint 3 — Tools allowlist (drives which functions the model may call)
+  tools: string[];
+  // Sprint 3 — Context preset
+  project: string;
+  cliContext: boolean;
+  rollingRecap: boolean;
+  rollingTerminal: boolean;
+  // Sprint 3 — Web search allowlist
+  webAllowlist: string[];
+  // Sprint 3 — Safety gate
+  askBeforeActing: boolean;
+  // Sprint 3 — Custom command recipes
+  customCommands: PersonaCustomCommand[];
   /** Round-tripped extra frontmatter fields the form doesn't edit. */
   extraFrontmatter: Record<string, unknown>;
 }
@@ -113,8 +135,10 @@ function serializeValue(value: unknown): string {
 }
 
 /** Naive YAML frontmatter parser for the schema we emit. Handles scalars,
- *  quoted strings, and `[...]` flow arrays. Anything more exotic falls into
- *  `extraFrontmatter` untouched. */
+ *  quoted strings, `[...]` flow arrays, and JSON-style flow arrays of flow
+ *  maps (custom_commands). Hand-edited block-style content lands as-is in
+ *  `extraFrontmatter` — the UI editor will rewrite it in flow style on next
+ *  save, so authoring stays Python-side authoritative until then. */
 function parseYaml(text: string): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const rawLine of text.split("\n")) {
@@ -128,10 +152,16 @@ function parseYaml(text: string): Record<string, unknown> {
       out[key] = "";
       continue;
     }
-    // flow array
+    // Flow array — try JSON.parse first (handles `[{trigger:"x",...}, ...]`).
     if (valueStr.startsWith("[") && valueStr.endsWith("]")) {
-      const inner = valueStr.slice(1, -1).trim();
-      out[key] = inner ? inner.split(",").map((s) => unquote(s.trim())) : [];
+      try {
+        // Trust valid JSON shape we emit ourselves.
+        out[key] = JSON.parse(valueStr);
+      } catch {
+        // Fallback for human-edited scalar arrays: split-by-comma + unquote.
+        const inner = valueStr.slice(1, -1).trim();
+        out[key] = inner ? inner.split(",").map((s) => unquote(s.trim())) : [];
+      }
       continue;
     }
     out[key] = unquote(valueStr);
@@ -146,9 +176,45 @@ function unquote(s: string): string {
   return s;
 }
 
+/** Coerce a frontmatter value to bool — `true`/`false` may arrive as YAML
+ *  native bool (already JS bool), as string ("true"/"yes"/"1"), or be absent.
+ *  Mirrors Python's `_coerce_bool` so round-trips don't drift. */
+function coerceBool(value: unknown, fallback: boolean): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const s = value.trim().toLowerCase();
+    return s === "true" || s === "yes" || s === "1" || s === "on";
+  }
+  return fallback;
+}
+
+function coerceStringList(value: unknown): string[] {
+  if (!value) return [];
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.map((x) => String(x));
+  return [];
+}
+
+function coerceCommandList(value: unknown): PersonaCustomCommand[] {
+  if (!Array.isArray(value)) return [];
+  const out: PersonaCustomCommand[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const obj = item as Record<string, unknown>;
+    const trigger = String(obj.trigger ?? "").trim();
+    const action = String(obj.action ?? "").trim();
+    if (trigger && action) out.push({ trigger, action });
+  }
+  return out;
+}
+
 const KNOWN_KEYS = new Set([
   "type", "slug", "name", "description", "provider", "model", "voice", "vad",
   "greeting_mode", "greeting_text", "system_prompt",
+  // Sprint 3 first-class fields
+  "obsidian_skills", "obsidian_notes", "tools",
+  "project", "cli_context", "rolling_recap", "rolling_terminal",
+  "web_allowlist", "ask_before_acting", "custom_commands",
 ]);
 
 export async function readPersonaFile(slug: string): Promise<PersonaFile> {
@@ -175,6 +241,16 @@ export async function readPersonaFile(slug: string): Promise<PersonaFile> {
     greetingMode: (fm.greeting_mode as PersonaFile["greetingMode"]) || "persona",
     greetingText: String(fm.greeting_text || ""),
     systemPrompt: body,
+    obsidianSkills: coerceStringList(fm.obsidian_skills),
+    obsidianNotes: coerceStringList(fm.obsidian_notes),
+    tools: coerceStringList(fm.tools),
+    project: String(fm.project || ""),
+    cliContext: coerceBool(fm.cli_context, false),
+    rollingRecap: coerceBool(fm.rolling_recap, true),
+    rollingTerminal: coerceBool(fm.rolling_terminal, false),
+    webAllowlist: coerceStringList(fm.web_allowlist),
+    askBeforeActing: coerceBool(fm.ask_before_acting, false),
+    customCommands: coerceCommandList(fm.custom_commands),
     extraFrontmatter: extra,
   };
 }
@@ -193,6 +269,19 @@ export async function writePersonaFile(p: PersonaFile): Promise<void> {
   if (p.vad) map.vad = p.vad;
   map.greeting_mode = p.greetingMode;
   if (p.greetingText) map.greeting_text = p.greetingText;
+  // Sprint 3 — emit only when non-default so existing personas don't grow
+  // a wall of frontmatter on first re-save.
+  if (p.obsidianSkills.length) map.obsidian_skills = p.obsidianSkills;
+  if (p.obsidianNotes.length) map.obsidian_notes = p.obsidianNotes;
+  if (p.tools.length) map.tools = p.tools;
+  if (p.project) map.project = p.project;
+  if (p.cliContext) map.cli_context = true;
+  if (!p.rollingRecap) map.rolling_recap = false; // default is true → omit when true
+  if (p.rollingTerminal) map.rolling_terminal = true;
+  if (p.webAllowlist.length) map.web_allowlist = p.webAllowlist;
+  if (p.askBeforeActing) map.ask_before_acting = true;
+  if (p.customCommands.length) map.custom_commands = p.customCommands;
+  // Round-trip anything else we don't model explicitly (avatar, creativity, …).
   Object.assign(map, p.extraFrontmatter);
 
   const content =
@@ -222,6 +311,16 @@ export function emptyPersonaFile(slug: string, name: string): PersonaFile {
       `- Ton : direct, sans flagornerie, challenge utile\n` +
       `- Format réponse : court, oral-friendly\n` +
       `- Interdits : (sujets ou comportements à éviter)\n`,
+    obsidianSkills: [],
+    obsidianNotes: [],
+    tools: [],
+    project: "",
+    cliContext: false,
+    rollingRecap: true,
+    rollingTerminal: false,
+    webAllowlist: [],
+    askBeforeActing: false,
+    customCommands: [],
     extraFrontmatter: {},
   };
 }
