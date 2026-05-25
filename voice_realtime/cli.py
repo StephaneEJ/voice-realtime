@@ -1145,13 +1145,13 @@ async def _run_talk(
             _dispatch_tool_call can either run the tool (approve=True) or
             send back an error response (approve=False).
             """
+            from .tool_confirm import resolve_confirmation
             call_id = str(msg.get("callId", ""))
             approve = bool(msg.get("approve", False))
-            fut = pending_confirms.get(call_id)
-            if fut is None or fut.done():
+            ok = resolve_confirmation(pending_confirms, call_id=call_id, approve=approve)
+            if not ok:
                 logger.warning("tool.confirm_reply for unknown/closed call_id=%r approve=%s", call_id, approve)
                 return
-            fut.set_result(approve)
             logger.info("tool.confirm_reply call_id=%r approve=%s", call_id, approve)
 
         attached.on_command("mute", _on_mute)
@@ -1292,24 +1292,17 @@ async def _run_talk(
                 except Exception:
                     logger.exception("send_function_response (refusal) failed")
                 return
-            fut: asyncio.Future[bool] = asyncio.get_event_loop().create_future()
-            pending_confirms[call_id] = fut
-            await attached.emit({
-                "ev": "tool.confirm_request",
-                "callId": call_id,
-                "name": name,
-                "args": args,
-                "ts": int(time.time() * 1000),
-            })
-            try:
-                approve = await asyncio.wait_for(fut, timeout=60.0)
-            except asyncio.TimeoutError:
-                logger.warning("tool.confirm timeout name=%r call_id=%r — denying", name, call_id)
-                approve = False
-            finally:
-                pending_confirms.pop(call_id, None)
+            from .tool_confirm import request_confirmation
+            approve = await request_confirmation(
+                attached,
+                pending_confirms,
+                call_id=call_id,
+                name=name,
+                args=args,
+                timeout=60.0,
+            )
             if not approve:
-                logger.info("tool denied by user name=%r call_id=%r", name, call_id)
+                logger.info("tool denied/timeout name=%r call_id=%r", name, call_id)
                 response_payload = {"error": "user_denied"}
                 try:
                     await impl.send_function_response(call_id, name, response_payload)
