@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from typing import TYPE_CHECKING
 
 import numpy as np
 import sounddevice as sd
+
+if TYPE_CHECKING:
+    from .aec import EchoCanceller
 
 
 class AudioPlayer:
@@ -18,11 +22,21 @@ class AudioPlayer:
         await player.enqueue(pcm16_bytes)
         ...
         player.stop()
+
+    When ``aec`` is provided, every batch of speaker samples that leaves the
+    callback is also pushed into the canceller as a reference signal so the
+    mic-side can subtract it on capture.
     """
 
-    def __init__(self, rate: int = 24000, channels: int = 1) -> None:
+    def __init__(
+        self,
+        rate: int = 24000,
+        channels: int = 1,
+        aec: "EchoCanceller | None" = None,
+    ) -> None:
         self.rate = rate
         self.channels = channels
+        self.aec = aec
         self._buffer: bytearray = bytearray()
         self._lock = threading.Lock()
         self._stream: sd.OutputStream | None = None
@@ -74,6 +88,13 @@ class AudioPlayer:
         rms = float(np.sqrt(np.mean(arr * arr))) if arr.size else 0.0
         prev = self.level
         self.level = rms if rms > prev else (prev * 0.80 + rms * 0.20)
+        # Feed the AEC reference path with whatever just hit the speaker.
+        # Mono only — we only support channels=1 here, matching MicrophoneStream.
+        if self.aec is not None and arr.size:
+            try:
+                self.aec.push_reference(outdata.tobytes(), src_rate=self.rate)
+            except Exception:
+                pass
 
     async def enqueue(self, pcm16_bytes: bytes) -> None:
         # No await needed — lock is thread-safe, PortAudio drains in its own thread.
@@ -92,6 +113,14 @@ class AudioPlayer:
         with self._lock:
             n = len(self._buffer)
             self._buffer.clear()
+        # Discarding queued speaker audio invalidates any ref still aligned to
+        # those (now-cancelled) frames — clear the AEC ring so the next mic
+        # frames aren't subtracting a phantom echo.
+        if self.aec is not None:
+            try:
+                self.aec.reset()
+            except Exception:
+                pass
         return n
 
     def buffered_bytes(self) -> int:

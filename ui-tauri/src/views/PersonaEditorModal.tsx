@@ -428,7 +428,7 @@ export function PersonaEditorModal({
 
               <Section
                 title="Skills + safety"
-                defaultOpen={persona.tools.length > 0 || persona.askBeforeActing}
+                defaultOpen={persona.tools.length > 0 || persona.askBeforeActing || persona.aec}
               >
                 <Row label="Outils autorisés (tools)">
                   <TagListInput
@@ -443,6 +443,13 @@ export function PersonaEditorModal({
                     checked={persona.askBeforeActing}
                     onChange={(v) => update("askBeforeActing", v)}
                     label="Demander confirmation avant chaque outil WRITE/DANGEROUS"
+                  />
+                </Row>
+                <Row label=" ">
+                  <Toggle
+                    checked={persona.aec}
+                    onChange={(v) => update("aec", v)}
+                    label="AEC — Annulation d'écho (chat sans casque, mic forcé à 16 kHz)"
                   />
                 </Row>
                 <Row label="Web allowlist (web_search)">

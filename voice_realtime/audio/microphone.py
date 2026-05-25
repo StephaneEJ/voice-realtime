@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from typing import AsyncIterator, TYPE_CHECKING
 
 import numpy as np
 import sounddevice as sd
+
+if TYPE_CHECKING:
+    from .aec import EchoCanceller
 
 
 class MicrophoneStream:
@@ -18,13 +21,24 @@ class MicrophoneStream:
             async for chunk in mic:
                 # chunk: bytes (PCM16 little-endian)
                 ...
+
+    When ``aec`` is provided, each callback frame is run through the echo
+    canceller before being enqueued — the ref signal is pushed elsewhere by
+    the matching ``AudioPlayer``.
     """
 
-    def __init__(self, rate: int = 24000, chunk_ms: int = 200, channels: int = 1) -> None:
+    def __init__(
+        self,
+        rate: int = 24000,
+        chunk_ms: int = 200,
+        channels: int = 1,
+        aec: "EchoCanceller | None" = None,
+    ) -> None:
         self.rate = rate
         self.chunk_ms = chunk_ms
         self.channels = channels
         self.chunk_frames = int(rate * chunk_ms / 1000)
+        self.aec = aec
         # Larger queue (256 * 200ms = ~51s buffer) tolerates pikes. drop-oldest still safety net.
         self._queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=256)
         self._stream: sd.InputStream | None = None
@@ -67,6 +81,12 @@ class MicrophoneStream:
         prev = self.level
         self.level = rms if rms > prev else (prev * 0.80 + rms * 0.20)
         pcm16_bytes = indata.tobytes()
+        if self.aec is not None:
+            try:
+                pcm16_bytes = self.aec.process(pcm16_bytes, src_rate=self.rate)
+            except Exception:
+                # Never let an AEC hiccup drop a mic frame — fall back to raw.
+                pass
         try:
             self._loop.call_soon_threadsafe(self._safe_put, pcm16_bytes)
         except RuntimeError:

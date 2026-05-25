@@ -70,6 +70,7 @@ class Persona:
     rolling_terminal: bool = False  # silent injection of new terminal content
     web_allowlist: list[str] = field(default_factory=list)  # domains for web_search
     ask_before_acting: bool = False  # gate WRITE_USER_SCOPE+ tool calls behind UI confirm
+    aec: bool = False  # enable acoustic echo cancellation (chat without headphones)
     # Phrase → tool call recipes. Each item:
     #   {"trigger": "capture this", "action": "vault_write(path=..., content=...)"}
     # Free-form action string for now; future Sprint may parse into tool chains.
@@ -202,6 +203,7 @@ def load_persona_file(path: Path) -> Persona:
         rolling_terminal=_coerce_bool(fm.get("rolling_terminal"), default=False),
         web_allowlist=_coerce_list(fm.get("web_allowlist")),
         ask_before_acting=_coerce_bool(fm.get("ask_before_acting"), default=False),
+        aec=_coerce_bool(fm.get("aec"), default=False),
         custom_commands=_coerce_command_list(fm.get("custom_commands")),
         source_path=path,
     )

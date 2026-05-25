@@ -696,6 +696,11 @@ def talk(
         "--ws-port",
         help="Port for the --ui WebSocket server. Loopback only. Default matches design/README.md.",
     ),
+    aec: bool = typer.Option(
+        False,
+        "--aec/--no-aec",
+        help="Acoustic echo cancellation — required for chat without headphones. Forces mic rate to 16 kHz (Speex MDF). Persona frontmatter 'aec: true' is the recommended opt-in path.",
+    ),
 ) -> None:
     """M2-M4: duplex audio session with context injection, cost tracking, vault save."""
     try:
@@ -729,6 +734,8 @@ def talk(
             voice = persona_obj.voice
         if persona_obj.vad and vad == "balanced":
             vad = persona_obj.vad
+        if persona_obj.aec and not aec:
+            aec = True
         persona_knowledge = build_persona_knowledge_block(persona_obj)
 
     if provider == "openai":
@@ -831,6 +838,7 @@ def talk(
             ws_port=ws_port,
             tools_registry=session_registry,
             ask_before_acting=(persona_obj.ask_before_acting if persona_obj else False),
+            aec_enabled=aec,
         )
     )
 
@@ -863,6 +871,7 @@ async def _run_talk(
     ws_port: int = 7711,
     tools_registry: ToolRegistry | None = None,
     ask_before_acting: bool = False,
+    aec_enabled: bool = False,
 ) -> None:
     # Lazy import audio to avoid PortAudio errors at module load
     from .audio.microphone import MicrophoneStream
@@ -896,6 +905,13 @@ async def _run_talk(
         input_rate = mic_rate_override or GEMINI_INPUT_SAMPLE_RATE
         output_rate = GEMINI_OUTPUT_SAMPLE_RATE
         impl = GeminiProvider()  # type: ignore[assignment]
+
+    # AEC runs at 16 kHz internally (Speex MDF). When enabled we lock the mic
+    # rate to 16 kHz so the canceller's output can flow straight to the server
+    # without an extra resample. Reference signal is resampled from the
+    # player's native rate inside EchoCanceller.push_reference.
+    if aec_enabled and input_rate != 16000:
+        input_rate = 16000
 
     valid_vads = {"reactive", "balanced", "patient", "very-patient"}
     if vad not in valid_vads:
@@ -997,9 +1013,22 @@ async def _run_talk(
         max_duration_seconds=max_minutes * 60.0,
     )
 
-    player = AudioPlayer(rate=output_rate)
+    echo_canceller = None
+    if aec_enabled:
+        try:
+            from .audio.aec import EchoCanceller
+            echo_canceller = EchoCanceller(delay_ms=60, tail_ms=100, enable_preprocess=True)
+            logger.info("AEC enabled — Speex MDF @ 16 kHz, delay 60 ms, tail 100 ms")
+        except ImportError as exc:
+            console.print(
+                f"[red]AEC requested but pyaec not installed: {exc}. "
+                f"Run `uv add pyaec`.[/red]"
+            )
+            raise typer.Exit(1)
+
+    player = AudioPlayer(rate=output_rate, aec=echo_canceller)
     player.start()
-    mic_stream = MicrophoneStream(rate=input_rate, chunk_ms=200)
+    mic_stream = MicrophoneStream(rate=input_rate, chunk_ms=200, aec=echo_canceller)
     latency = LatencyTracker()
 
     transcript_user: list[str] = []

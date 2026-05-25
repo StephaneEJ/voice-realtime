@@ -41,6 +41,8 @@ export interface PersonaFile {
   webAllowlist: string[];
   // Sprint 3 — Safety gate
   askBeforeActing: boolean;
+  // Chantier #1 — Acoustic echo cancellation (chat without headphones)
+  aec: boolean;
   // Sprint 3 — Custom command recipes
   customCommands: PersonaCustomCommand[];
   /** Round-tripped extra frontmatter fields the form doesn't edit. */
@@ -214,7 +216,7 @@ const KNOWN_KEYS = new Set([
   // Sprint 3 first-class fields
   "obsidian_skills", "obsidian_notes", "tools",
   "project", "cli_context", "rolling_recap", "rolling_terminal",
-  "web_allowlist", "ask_before_acting", "custom_commands",
+  "web_allowlist", "ask_before_acting", "aec", "custom_commands",
 ]);
 
 export async function readPersonaFile(slug: string): Promise<PersonaFile> {
@@ -250,6 +252,7 @@ export async function readPersonaFile(slug: string): Promise<PersonaFile> {
     rollingTerminal: coerceBool(fm.rolling_terminal, false),
     webAllowlist: coerceStringList(fm.web_allowlist),
     askBeforeActing: coerceBool(fm.ask_before_acting, false),
+    aec: coerceBool(fm.aec, false),
     customCommands: coerceCommandList(fm.custom_commands),
     extraFrontmatter: extra,
   };
@@ -280,6 +283,7 @@ export async function writePersonaFile(p: PersonaFile): Promise<void> {
   if (p.rollingTerminal) map.rolling_terminal = true;
   if (p.webAllowlist.length) map.web_allowlist = p.webAllowlist;
   if (p.askBeforeActing) map.ask_before_acting = true;
+  if (p.aec) map.aec = true;
   if (p.customCommands.length) map.custom_commands = p.customCommands;
   // Round-trip anything else we don't model explicitly (avatar, creativity, …).
   Object.assign(map, p.extraFrontmatter);
@@ -320,6 +324,7 @@ export function emptyPersonaFile(slug: string, name: string): PersonaFile {
     rollingTerminal: false,
     webAllowlist: [],
     askBeforeActing: false,
+    aec: false,
     customCommands: [],
     extraFrontmatter: {},
   };
