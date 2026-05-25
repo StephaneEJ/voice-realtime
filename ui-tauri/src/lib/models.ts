@@ -51,8 +51,12 @@ export interface SessionMetrics {
   costUsd: number;
   ttfaMs: number | null;       // time-to-first-audio
   ttfiMs: number | null;       // time-to-first-interrupt
-  tokensIn: number;            // future — not yet emitted by backend
-  tokensOut: number;           // future — not yet emitted by backend
+  // Sprint 4 — proxy estimates emitted by backend cost.tick. Not real
+  // provider usage counters yet (see voice_realtime/cost_tracker.py).
+  tokensIn: number;
+  tokensOut: number;
+  tokensTotal: number;
+  tokensCapModel: number;      // provider context window (1M Gemini, 128k OpenAI)
 }
 
 export function formatDuration(seconds: number): string {
@@ -161,8 +165,23 @@ export type WSEvent =
   | { ev: "ttfa"; ms: number }
   | { ev: "ttfi"; ms: number }
   | { ev: "model.interrupted" }
-  | { ev: "cost.tick"; delta: number; total: number; elapsed: number }
+  | {
+      ev: "cost.tick";
+      delta: number;
+      total: number;
+      elapsed: number;
+      // Sprint 4 — proxy token estimates (not real provider counters yet).
+      tokensIn?: number;
+      tokensOut?: number;
+      tokensTotal?: number;
+      tokensCapModel?: number;
+    }
   | { ev: "mute.state"; on: boolean }
+  // Sprint 1 — tool call lifecycle.
+  | { ev: "tool.call"; callId: string; name: string; args: Record<string, unknown>; ts: number }
+  | { ev: "tool.result"; callId: string; name: string; ok: boolean; summary: string; durationMs: number }
+  // Sprint 4 — ask-before-acting gate. UI must reply with tool.confirm_reply.
+  | { ev: "tool.confirm_request"; callId: string; name: string; args: Record<string, unknown>; ts: number }
   | { ev: "error"; code: string; msg: string };
 
 // ─── WS wire types (commands sent to control_server) ──────────────────────
@@ -171,4 +190,6 @@ export type WSCommand =
   | { op: "personas.list" }
   | { op: "settings.get" }
   | { op: "mute"; on: boolean }
-  | { op: "session.stop" };
+  | { op: "session.stop" }
+  // Sprint 4 — reply to tool.confirm_request, drives ask-before-acting flow.
+  | { op: "tool.confirm_reply"; callId: string; approve: boolean };

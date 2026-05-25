@@ -23,6 +23,7 @@ WS message schema (echoed in design/README.md):
 → {"op": "personas.list"}
 → {"op": "mute", "on": true}
 → {"op": "session.stop"}
+→ {"op": "tool.confirm_reply", "callId": "...", "approve": true}    # Sprint 4
 
 ← {"ev": "personas.list", "personas": [{...}]}
 ← {"ev": "session.opened", "sessionId": "...", "personaId": "...", "model": "...", ...}
@@ -353,7 +354,7 @@ class ControlServer:
         if op == "settings.get":
             await ws.send(json.dumps(_build_settings_payload(), ensure_ascii=False))
             return
-        if op in ("mute", "session.stop"):
+        if op in ("mute", "session.stop", "tool.confirm_reply"):
             session = self.attached_session
             if session is None or session._closed:
                 await ws.send(json.dumps(_err("NO_SESSION", "no active session attached")))

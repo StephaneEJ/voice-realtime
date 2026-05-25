@@ -59,6 +59,34 @@ class CostTracker:
     def estimated_cost_usd(self) -> float:
         return (self.elapsed_seconds / 3600.0) * self.hourly_rate_usd
 
+    # Token estimates — proxy values derived from elapsed time, NOT real
+    # provider usage_metadata. Both providers stream tokens but neither
+    # exposes a clean realtime counter today; we approximate at ~50 tok/s
+    # per direction (audio tokenization is roughly ~3000 tokens per minute
+    # for mid-quality speech). Replace with provider-reported counts when
+    # OpenAI Realtime `response.done` usage / Gemini usage_metadata wiring
+    # lands (separate sprint).
+    _TOKENS_PER_SECOND = 50.0
+    # Conservative model context window proxy — used by UI as denominator.
+    # Gemini Live: 1M tokens. OpenAI Realtime-2: 128k tokens.
+    _CONTEXT_WINDOW_BY_PROVIDER = {"gemini": 1_000_000, "openai": 128_000}
+
+    @property
+    def estimated_tokens_in(self) -> int:
+        return int(self.elapsed_seconds * self._TOKENS_PER_SECOND)
+
+    @property
+    def estimated_tokens_out(self) -> int:
+        return int(self.elapsed_seconds * self._TOKENS_PER_SECOND)
+
+    @property
+    def estimated_tokens_total(self) -> int:
+        return self.estimated_tokens_in + self.estimated_tokens_out
+
+    @property
+    def context_window_tokens(self) -> int:
+        return self._CONTEXT_WINDOW_BY_PROVIDER.get(self.provider, 128_000)
+
     def should_warn(self) -> bool:
         if self._warned:
             return False

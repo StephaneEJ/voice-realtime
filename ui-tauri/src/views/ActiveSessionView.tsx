@@ -168,6 +168,8 @@ export function ActiveSessionView({
         costUsd={metrics.costUsd}
         ttfaMs={metrics.ttfaMs}
         ttfiMs={metrics.ttfiMs}
+        tokensTotal={metrics.tokensTotal}
+        tokensCapModel={metrics.tokensCapModel}
       />
     </div>
   );

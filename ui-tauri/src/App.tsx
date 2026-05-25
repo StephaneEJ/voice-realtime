@@ -9,6 +9,7 @@ import { WelcomeView } from "./views/WelcomeView";
 import { ActiveSessionView, LiveSession } from "./views/ActiveSessionView";
 import { SettingsModal } from "./views/SettingsModal";
 import { EdgeStateBanners } from "./views/EdgeStateBanners";
+import { ToolConfirmModal, ToolConfirmRequest } from "./views/ToolConfirmModal";
 import {
   ConnectionState,
   createVoiceRTClient,
@@ -36,6 +37,8 @@ const EMPTY_METRICS: SessionMetrics = {
   ttfiMs: null,
   tokensIn: 0,
   tokensOut: 0,
+  tokensTotal: 0,
+  tokensCapModel: 0,
 };
 
 function App() {
@@ -51,6 +54,10 @@ function App() {
   const [muted, setMuted] = useState(false);
   const [settings, setSettings] = useState<SettingsSnapshot | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Sprint 4 — pending tool.confirm_request. Single-modal model: if a new
+  // request arrives while one is open, the old one is auto-declined locally
+  // (server will time it out after 60s either way).
+  const [pendingTool, setPendingTool] = useState<ToolConfirmRequest | null>(null);
 
   const handleEvent = useCallback((event: WSEvent) => {
     switch (event.ev) {
@@ -140,6 +147,10 @@ function App() {
           ...m,
           costUsd: event.total,
           durationSeconds: event.elapsed,
+          tokensIn: event.tokensIn ?? m.tokensIn,
+          tokensOut: event.tokensOut ?? m.tokensOut,
+          tokensTotal: event.tokensTotal ?? m.tokensTotal,
+          tokensCapModel: event.tokensCapModel ?? m.tokensCapModel,
         }));
         break;
       case "mute.state":
@@ -148,10 +159,29 @@ function App() {
       case "model.interrupted":
         // ttfi event follows with the actual value; just a signal here.
         break;
+      case "tool.call":
+        console.debug("[tool.call]", event.name, event.args);
+        break;
+      case "tool.result":
+        console.debug("[tool.result]", event.name, event.ok, event.summary);
+        break;
+      case "tool.confirm_request":
+        setPendingTool({
+          callId: event.callId,
+          name: event.name,
+          args: event.args,
+          ts: event.ts,
+        });
+        break;
       case "error":
         console.error("[server error]", event.code, event.msg);
         break;
     }
+  }, []);
+
+  const replyToolConfirm = useCallback((callId: string, approve: boolean) => {
+    clientRef.current?.send({ op: "tool.confirm_reply", callId, approve });
+    setPendingTool((curr) => (curr && curr.callId === callId ? null : curr));
   }, []);
 
   useEffect(() => {
@@ -328,6 +358,7 @@ function App() {
         onRefresh={refreshSettings}
         onPersonasRefresh={refreshPersonas}
       />
+      <ToolConfirmModal request={pendingTool} onDecide={replyToolConfirm} />
     </div>
   );
 }

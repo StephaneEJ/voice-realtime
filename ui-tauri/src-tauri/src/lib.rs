@@ -35,7 +35,20 @@ const CLI_BIN: &str = "/Users/stephanedufresne/OBSIDIAN/PROJETS DEV/voice-realti
 const CLI_LOG: &str = "/tmp/voice-realtime-cli.log";
 
 #[tauri::command]
-async fn spawn_cli_session(persona: String, max_minutes: Option<f64>) -> Result<(), String> {
+#[allow(clippy::too_many_arguments)]
+async fn spawn_cli_session(
+    persona: String,
+    max_minutes: Option<f64>,
+    // Sprint 4 — forward persona-driven flags so the UI can launch a session
+    // pre-configured (project hint, cli_context, rolling toggles). None = let
+    // the CLI fall back to its own defaults (which include the persona's
+    // frontmatter, so passing them again here is redundant if you trust
+    // persona load — but explicit > implicit when scripting).
+    project: Option<String>,
+    cli_context: Option<bool>,
+    rolling_recap: Option<bool>,
+    rolling_terminal: Option<bool>,
+) -> Result<(), String> {
     let max = max_minutes.unwrap_or(30.0);
     let max_str = format!("{}", max);
 
@@ -50,16 +63,32 @@ async fn spawn_cli_session(persona: String, max_minutes: Option<f64>) -> Result<
     let log_err = log.try_clone()
         .map_err(|e| format!("cannot clone log handle: {}", e))?;
 
+    let mut args: Vec<String> = vec![
+        "talk".into(),
+        "--ui".into(),
+        "--persona".into(),
+        persona.clone(),
+        "--max-minutes".into(),
+        max_str,
+        "--clean-terminal".into(),
+    ];
+    if let Some(p) = project.as_ref().filter(|s| !s.trim().is_empty()) {
+        args.push("--project".into());
+        args.push(p.clone());
+    }
+    if let Some(true) = cli_context {
+        args.push("--cli-context".into());
+    }
+    // rolling_recap defaults ON in the CLI, expose explicit opt-out flag.
+    if let Some(false) = rolling_recap {
+        args.push("--no-rolling-recap".into());
+    }
+    if let Some(true) = rolling_terminal {
+        args.push("--rolling-terminal".into());
+    }
+
     let result = Command::new(CLI_BIN)
-        .args([
-            "talk",
-            "--ui",
-            "--persona",
-            &persona,
-            "--max-minutes",
-            &max_str,
-            "--clean-terminal",
-        ])
+        .args(&args)
         // Inherit the user's full env (HOME, PATH, GOOGLE creds, etc.) —
         // the CLI loads config from $HOME/.claude/voice-realtime.env and
         // sounddevice needs DYLD_LIBRARY_PATH on macOS.

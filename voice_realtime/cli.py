@@ -830,6 +830,7 @@ def talk(
             ui_enabled=ui,
             ws_port=ws_port,
             tools_registry=session_registry,
+            ask_before_acting=(persona_obj.ask_before_acting if persona_obj else False),
         )
     )
 
@@ -861,6 +862,7 @@ async def _run_talk(
     ui_enabled: bool = False,
     ws_port: int = 7711,
     tools_registry: ToolRegistry | None = None,
+    ask_before_acting: bool = False,
 ) -> None:
     # Lazy import audio to avoid PortAudio errors at module load
     from .audio.microphone import MicrophoneStream
@@ -1109,8 +1111,23 @@ async def _run_talk(
             logger.info("UI requested stop")
             _request_stop()
 
+        def _on_tool_confirm_reply(msg: dict) -> None:
+            """Resolve the pending future for the matching call_id so
+            _dispatch_tool_call can either run the tool (approve=True) or
+            send back an error response (approve=False).
+            """
+            call_id = str(msg.get("callId", ""))
+            approve = bool(msg.get("approve", False))
+            fut = pending_confirms.get(call_id)
+            if fut is None or fut.done():
+                logger.warning("tool.confirm_reply for unknown/closed call_id=%r approve=%s", call_id, approve)
+                return
+            fut.set_result(approve)
+            logger.info("tool.confirm_reply call_id=%r approve=%s", call_id, approve)
+
         attached.on_command("mute", _on_mute)
         attached.on_command("session.stop", _on_ui_stop)
+        attached.on_command("tool.confirm_reply", _on_tool_confirm_reply)
 
     # Client-side barge-in: when user starts speaking while model audio is
     # still buffered, flush locally without waiting for server VAD →
@@ -1200,6 +1217,11 @@ async def _run_talk(
     # Default = hidden (sync with audio at turn end). --show-partial re-enables streaming.
     turn_streamed = False
 
+    # Sprint 4 ask-before-acting — pending confirmation futures keyed by call_id.
+    # When ask_before_acting + tool.requires_confirmation, _dispatch_tool_call
+    # emits tool.confirm_request and awaits the matching tool.confirm_reply.
+    pending_confirms: dict[str, asyncio.Future[bool]] = {}
+
     async def _dispatch_tool_call(call_data: dict) -> None:
         """Run a model-issued tool call out-of-band, send the result back.
 
@@ -1220,6 +1242,61 @@ async def _run_talk(
                 "args": args,
                 "ts": int(t0 * 1000),
             })
+
+        # Ask-before-acting gate — only fires when (a) persona opted in AND
+        # (b) the tool itself is WRITE_USER_SCOPE+ AND (c) the UI is attached
+        # to actually ask. Without UI attached, we fail closed (refuse) rather
+        # than silently bypassing the user's safety choice.
+        needs_confirm = (
+            ask_before_acting
+            and tools_registry.requires_confirmation(name)
+        )
+        if needs_confirm:
+            if attached is None:
+                logger.warning(
+                    "ask_before_acting set but no UI attached — refusing tool %r call_id=%r",
+                    name, call_id,
+                )
+                response_payload = {"error": "user_confirmation_required_but_no_ui"}
+                try:
+                    await impl.send_function_response(call_id, name, response_payload)
+                except Exception:
+                    logger.exception("send_function_response (refusal) failed")
+                return
+            fut: asyncio.Future[bool] = asyncio.get_event_loop().create_future()
+            pending_confirms[call_id] = fut
+            await attached.emit({
+                "ev": "tool.confirm_request",
+                "callId": call_id,
+                "name": name,
+                "args": args,
+                "ts": int(time.time() * 1000),
+            })
+            try:
+                approve = await asyncio.wait_for(fut, timeout=60.0)
+            except asyncio.TimeoutError:
+                logger.warning("tool.confirm timeout name=%r call_id=%r — denying", name, call_id)
+                approve = False
+            finally:
+                pending_confirms.pop(call_id, None)
+            if not approve:
+                logger.info("tool denied by user name=%r call_id=%r", name, call_id)
+                response_payload = {"error": "user_denied"}
+                try:
+                    await impl.send_function_response(call_id, name, response_payload)
+                except Exception:
+                    logger.exception("send_function_response (denied) failed")
+                if attached is not None:
+                    await attached.emit({
+                        "ev": "tool.result",
+                        "callId": call_id,
+                        "name": name,
+                        "ok": False,
+                        "summary": "user denied",
+                        "durationMs": round((time.time() - t0) * 1000.0, 1),
+                    })
+                return
+
         try:
             result = await asyncio.to_thread(tools_registry.dispatch, name, **args)
         except Exception as exc:
@@ -1422,6 +1499,12 @@ async def _run_talk(
                     "delta": round(delta, 6),
                     "total": round(total, 4),
                     "elapsed": round(tracker.elapsed_seconds, 1),
+                    # Sprint 4 token budget viz — proxy estimates from elapsed,
+                    # NOT real provider usage counters (see CostTracker docstring).
+                    "tokensIn": tracker.estimated_tokens_in,
+                    "tokensOut": tracker.estimated_tokens_out,
+                    "tokensTotal": tracker.estimated_tokens_total,
+                    "tokensCapModel": tracker.context_window_tokens,
                 })
             if tracker.should_warn():
                 warn_msg = f"⚠ Cost warning: ${tracker.estimated_cost_usd:.2f} reached"
