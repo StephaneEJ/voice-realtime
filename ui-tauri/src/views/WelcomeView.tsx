@@ -9,7 +9,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
 import { Avatar } from "../components/Avatar";
 import { Kbd } from "../components/Kbd";
-import { StatusChip } from "../components/StatusChip";
 import type { Persona } from "../lib/models";
 
 export interface WelcomeViewProps {
@@ -104,7 +103,6 @@ export function WelcomeView({ personas, closeReason, onSettings }: WelcomeViewPr
           <span className="mf-display" style={{ fontSize: 15 }}>
             Personas
           </span>
-          <StatusChip variant="idle">idle</StatusChip>
         </div>
         <button
           type="button"

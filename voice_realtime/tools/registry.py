@@ -94,6 +94,43 @@ class ToolRegistry:
             for s in self._tools.values()
         ]
 
+    def provider_specs(self) -> list[Any]:
+        """Return registered tools as `base.ToolSpec` instances, ready to hand
+        to `provider.connect(tools=...)`. Kept separate from `as_specs()` so
+        the dict shape remains stable for any caller that consumed it before.
+        """
+        from ..providers.base import ToolSpec as ProviderToolSpec
+        return [
+            ProviderToolSpec(
+                name=s.name,
+                description=s.description,
+                parameters=s.parameters_schema,
+            )
+            for s in self._tools.values()
+        ]
+
+    def subset(self, names: list[str]) -> "ToolRegistry":
+        """Return a new registry containing only tools whose name is in
+        `names`. Unknown names are silently skipped so a persona referencing
+        a future tool doesn't crash the session.
+        """
+        sub = ToolRegistry()
+        wanted = set(names)
+        for s in self._tools.values():
+            if s.name in wanted:
+                sub._tools[s.name] = s
+        return sub
+
+    def requires_confirmation(self, name: str) -> bool:
+        """True if the named tool's safety level is WRITE_USER_SCOPE or
+        DANGEROUS. Used by the CLI when a persona has `ask_before_acting=True`
+        to gate dispatch through a UI confirmation.
+        """
+        spec = self.get(name)
+        if spec is None:
+            return False
+        return spec.safety >= ToolSafetyLevel.WRITE_USER_SCOPE
+
 
 # ─── Built-in safe read-only tools ────────────────────────────────────
 

@@ -22,6 +22,20 @@ EventKind = Literal[
 
 
 @dataclass(frozen=True)
+class ToolSpec:
+    """Provider-agnostic tool declaration the CLI hands to `connect(tools=...)`.
+
+    `parameters` is a JSON-Schema object (`type: object`, `properties`, `required`).
+    Both Gemini Live and OpenAI Realtime accept this shape verbatim — only the
+    surrounding envelope differs, handled inside each provider.
+    """
+
+    name: str
+    description: str
+    parameters: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class ProviderConfig:
     model: str
     api_key: str
@@ -50,7 +64,27 @@ class RealtimeEvent:
 class RealtimeVoiceProvider(Protocol):
     """All voice providers (OpenAI, Gemini, local) implement this."""
 
-    async def connect(self, config: ProviderConfig, system_prompt: str) -> None: ...
+    async def connect(
+        self,
+        config: ProviderConfig,
+        system_prompt: str,
+        tools: list[ToolSpec] | None = None,
+    ) -> None: ...
+
+    async def send_function_response(
+        self,
+        call_id: str,
+        name: str,
+        response: dict[str, Any],
+    ) -> None:
+        """Return a tool call's result to the model so it can resume.
+
+        `response` is the JSON-serializable payload (typically
+        `{"result": ...}` or `{"error": "..."}`). Provider impls wrap it in
+        the SDK-specific FunctionResponse shape and, for OpenAI, also fire
+        `response.create()` so the model speaks the synthesis aloud.
+        """
+        ...
 
     async def send_text(self, text: str) -> None: ...
 

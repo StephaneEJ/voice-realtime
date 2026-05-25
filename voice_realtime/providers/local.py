@@ -54,7 +54,7 @@ import shutil
 from dataclasses import dataclass
 from typing import AsyncIterator
 
-from .base import ProviderConfig, RealtimeEvent, RealtimeVoiceProvider
+from .base import ProviderConfig, RealtimeEvent, RealtimeVoiceProvider, ToolSpec
 
 
 # Default binary lookups — overridable via ProviderConfig.api_key
@@ -107,7 +107,12 @@ class LocalProvider(RealtimeVoiceProvider):
         # Future: queues for event fan-out
         self._events: asyncio.Queue[RealtimeEvent] = asyncio.Queue(maxsize=512)
 
-    async def connect(self, config: ProviderConfig, system_prompt: str) -> None:
+    async def connect(
+        self,
+        config: ProviderConfig,
+        system_prompt: str,
+        tools: list[ToolSpec] | None = None,
+    ) -> None:
         ok, missing = self._deps.all_present()
         if not ok:
             raise NotImplementedError(
@@ -121,6 +126,12 @@ class LocalProvider(RealtimeVoiceProvider):
 
     async def send_text(self, text: str) -> None:
         raise NotImplementedError("LocalProvider.send_text — Phase 3.1.b")
+
+    async def send_function_response(self, call_id: str, name: str, response: dict) -> None:
+        # Local Ollama loop has no realtime function-calling protocol; tools
+        # would be implemented as a post-generation parse step. Stub no-op so
+        # the CLI dispatch path doesn't crash if tools fire during local mode.
+        raise NotImplementedError("LocalProvider.send_function_response — Phase 3.1.b")
 
     async def send_silent_note(self, text: str) -> None:
         # Local model has no API-level system message during streaming;

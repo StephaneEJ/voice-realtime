@@ -11,7 +11,7 @@ from typing import AsyncIterator
 from google import genai
 
 from ..log import get_logger
-from .base import ProviderConfig, RealtimeEvent, RealtimeVoiceProvider
+from .base import ProviderConfig, RealtimeEvent, RealtimeVoiceProvider, ToolSpec
 
 logger = get_logger("voice_realtime.gemini")
 
@@ -70,6 +70,7 @@ class GeminiProvider:
         self._audio_mode: bool = False
         self._model_id: str = ""
         self._reconnect_count: int = 0
+        self._tools: list[ToolSpec] = []
 
     def _build_live_config(self) -> dict:
         is_native_audio = "native-audio" in self._model_id
@@ -78,6 +79,20 @@ class GeminiProvider:
             "context_window_compression": {"sliding_window": {}},
             "session_resumption": {},
         }
+        if self._tools:
+            # Gemini Live wraps function declarations in a single tools list.
+            # `parameters` is JSON-Schema; passed verbatim (Gemini accepts it).
+            live_config["tools"] = [{
+                "function_declarations": [
+                    {
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": t.parameters,
+                    }
+                    for t in self._tools
+                ]
+            }]
+            _dbg(f"tools wired count={len(self._tools)} names={[t.name for t in self._tools]}")
         if is_native_audio or self._audio_mode:
             live_config["response_modalities"] = ["AUDIO"]
             live_config["speech_config"] = {
@@ -121,12 +136,19 @@ class GeminiProvider:
             self._session_cm = None
             self._session = None
 
-    async def connect(self, config: ProviderConfig, system_prompt: str, audio: bool = False) -> None:
+    async def connect(
+        self,
+        config: ProviderConfig,
+        system_prompt: str,
+        audio: bool = False,
+        tools: list[ToolSpec] | None = None,
+    ) -> None:
         self._client = genai.Client(api_key=config.api_key)
         self._provider_config = config
         self._system_prompt = system_prompt
         self._audio_mode = audio
         self._model_id = config.model or DEFAULT_MODEL
+        self._tools = list(tools or [])
         await self._open_session()
         self._receiver_task = asyncio.create_task(self._reconnect_loop())
 
@@ -197,6 +219,27 @@ class GeminiProvider:
                     await self._events.put(
                         RealtimeEvent(kind="partial_transcript_model", data={"text": text})
                     )
+
+                # 2b. tool_call from model — fan out one event per function_call.
+                # Gemini bug-mitigation: id is REQUIRED on the FunctionResponse
+                # we'll send back; capture it now so the CLI can pair them.
+                tool_call = getattr(response, "tool_call", None)
+                if tool_call is not None:
+                    function_calls = getattr(tool_call, "function_calls", None) or []
+                    for fc in function_calls:
+                        call_id = getattr(fc, "id", None) or ""
+                        fc_name = getattr(fc, "name", "") or ""
+                        fc_args = getattr(fc, "args", None) or {}
+                        # `args` may arrive as a Mapping-like proto; coerce to plain dict.
+                        try:
+                            fc_args = dict(fc_args)
+                        except Exception:
+                            fc_args = {}
+                        _dbg(f"tool_call received name={fc_name!r} id={call_id!r} args={fc_args!r}")
+                        await self._events.put(RealtimeEvent(
+                            kind="tool_call",
+                            data={"call_id": call_id, "name": fc_name, "args": fc_args},
+                        ))
 
                 # 3. server_content contains transcriptions + model_turn structured data.
                 # Skip model_turn.parts[*].inline_data — it duplicates response.data (already emitted above).
@@ -276,6 +319,37 @@ class GeminiProvider:
         except Exception:
             # Don't let a recap failure tear down the session.
             pass
+
+    async def send_function_response(
+        self,
+        call_id: str,
+        name: str,
+        response: dict,
+    ) -> None:
+        """Return a tool result to Gemini. `id` is mandatory — Gemini SDK
+        raises `_FUNCTION_RESPONSE_REQUIRES_ID` if missing.
+
+        Survives mid-reconnect: if the session is None during the brief
+        reconnect window, drops the response (the model will retry the call
+        on the next turn if it still needs the data).
+        """
+        from google.genai import types as genai_types
+
+        async with self._session_lock:
+            session = self._session
+        if session is None:
+            _dbg(f"send_function_response dropped (mid-reconnect) name={name!r} id={call_id!r}")
+            return
+        try:
+            fr = genai_types.FunctionResponse(
+                id=call_id or None,
+                name=name,
+                response=response,
+            )
+            await session.send_tool_response(function_responses=[fr])
+            _dbg(f"sent function_response name={name!r} id={call_id!r}")
+        except Exception as exc:
+            _dbg(f"send_function_response failed name={name!r} id={call_id!r}: {exc!r}")
 
     async def send_audio_chunk(self, pcm16: bytes) -> None:
         # If we're mid-reconnect, session is None — drop chunk silently.

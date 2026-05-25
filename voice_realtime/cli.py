@@ -106,6 +106,7 @@ from .providers.openai_realtime import (
     OpenAIRealtimeProvider,
 )
 from .session_saver import save_session_note
+from .tools.registry import ToolRegistry, default_registry
 from .system_audio import (
     AnotherSessionActive,
     acquire_lock,
@@ -746,6 +747,15 @@ def talk(
         console.print(f"[red]Unknown provider: {provider}[/red]")
         raise typer.Exit(1)
 
+    # Build the per-session ToolRegistry filtered by the persona's allowlist.
+    # Empty `persona.tools` (or no persona) = no tools registered, model
+    # cannot call anything. Opt-in per persona is safer than opt-out, since
+    # a typo-able STT hit on a write tool would mutate the vault.
+    if persona_obj is not None and persona_obj.tools:
+        session_registry = default_registry().subset(persona_obj.tools)
+    else:
+        session_registry = ToolRegistry()
+
     # Build context-injected system prompt — persona's prompt replaces the
     # inline default when --persona is set.
     if persona_obj is not None:
@@ -774,6 +784,21 @@ def talk(
         system_prompt = base_prompt + "\n\n# Contexte vault (utilise si pertinent)\n\n" + ctx
     else:
         system_prompt = base_prompt
+
+    # 3-line tools trailer — short on purpose, the schemas live provider-side.
+    # Listing names + one-line descriptions is enough for the model to discover
+    # what's available without bloating the prompt.
+    if session_registry.names():
+        tool_lines = []
+        for n in session_registry.names():
+            spec = session_registry.get(n)
+            if spec is not None:
+                tool_lines.append(f"- {spec.name} : {spec.description}")
+        system_prompt = system_prompt + (
+            "\n\n# Outils disponibles\n\n"
+            "Tu peux appeler ces fonctions quand c'est utile (et seulement alors) :\n"
+            + "\n".join(tool_lines)
+        )
 
     log_path = setup_logging(provider=provider, verbose=verbose)
 
@@ -804,6 +829,7 @@ def talk(
             cli_context_on=cli_context,
             ui_enabled=ui,
             ws_port=ws_port,
+            tools_registry=session_registry,
         )
     )
 
@@ -834,6 +860,7 @@ async def _run_talk(
     cli_context_on: bool = False,
     ui_enabled: bool = False,
     ws_port: int = 7711,
+    tools_registry: ToolRegistry | None = None,
 ) -> None:
     # Lazy import audio to avoid PortAudio errors at module load
     from .audio.microphone import MicrophoneStream
@@ -914,8 +941,9 @@ async def _run_talk(
         _info(f"Paused external media: {', '.join(paused)}")
 
     _info(f"Connecting to {provider_name}...")
+    tools_list = tools_registry.provider_specs() if tools_registry and tools_registry.names() else None
     try:
-        await impl.connect(pcfg, system_prompt=system_prompt, audio=True)
+        await impl.connect(pcfg, system_prompt=system_prompt, audio=True, tools=tools_list)
     except Exception as exc:
         logger.exception("Connect failed")
         console.print(f"[red]Connect failed: {exc!r}[/red]")
@@ -1172,6 +1200,60 @@ async def _run_talk(
     # Default = hidden (sync with audio at turn end). --show-partial re-enables streaming.
     turn_streamed = False
 
+    async def _dispatch_tool_call(call_data: dict) -> None:
+        """Run a model-issued tool call out-of-band, send the result back.
+
+        Lives inside `_run_talk` so it can close over `impl`, `tools_registry`,
+        `attached`, `logger`. Errors never leak — the model receives an error
+        payload so the conversation can continue.
+        """
+        call_id = call_data.get("call_id", "") or ""
+        name = call_data.get("name", "") or ""
+        args = call_data.get("args", {}) or {}
+        t0 = time.time()
+        logger.info("tool dispatch start name=%r call_id=%r args=%r", name, call_id, args)
+        if attached is not None:
+            await attached.emit({
+                "ev": "tool.call",
+                "callId": call_id,
+                "name": name,
+                "args": args,
+                "ts": int(t0 * 1000),
+            })
+        try:
+            result = await asyncio.to_thread(tools_registry.dispatch, name, **args)
+        except Exception as exc:
+            logger.exception("tool dispatch crashed name=%r call_id=%r", name, call_id)
+            result = None
+            response_payload: dict = {"error": f"{type(exc).__name__}: {exc}"}
+            ok = False
+        else:
+            response_payload = result.as_function_response(name).get("response", {})
+            ok = result.ok
+        duration_ms = round((time.time() - t0) * 1000.0, 1)
+        try:
+            await impl.send_function_response(call_id, name, response_payload)
+        except Exception:
+            logger.exception("send_function_response failed name=%r call_id=%r", name, call_id)
+        logger.info("tool dispatch done name=%r call_id=%r ok=%s ms=%.1f", name, call_id, ok, duration_ms)
+        if attached is not None:
+            # Stringify the data for a short UI summary (full payload in logs).
+            data_snippet = ""
+            if result is not None and result.data is not None:
+                try:
+                    import json as _json
+                    data_snippet = _json.dumps(result.data, ensure_ascii=False)[:280]
+                except Exception:
+                    data_snippet = repr(result.data)[:280]
+            await attached.emit({
+                "ev": "tool.result",
+                "callId": call_id,
+                "name": name,
+                "ok": ok,
+                "summary": data_snippet,
+                "durationMs": duration_ms,
+            })
+
     async def _recv_pump() -> None:
         nonlocal end_reason, turn_streamed, _killchat_buffer
         try:
@@ -1287,6 +1369,14 @@ async def _run_talk(
                         console.print("[yellow]Voice kill switch: 'killchat' détecté — fin de session[/yellow]")
                         end_reason = "user_voice_killchat"
                         stop_event.set()
+                elif event.kind == "tool_call":
+                    # Dispatch in a worker task so blocking handlers (ripgrep,
+                    # network) don't stall the audio pumps. The provider keeps
+                    # streaming the user's audio while the tool runs.
+                    if tools_registry is None:
+                        logger.warning("tool_call received but no tools_registry wired — dropping")
+                    else:
+                        asyncio.create_task(_dispatch_tool_call(event.data))
                 elif event.kind == "model_interrupted":
                     # User broke in. Drop any audio already buffered so the model
                     # stops talking immediately rather than continuing for seconds.

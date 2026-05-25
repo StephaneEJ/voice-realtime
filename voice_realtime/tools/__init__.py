@@ -1,19 +1,20 @@
-"""Phase 3.5 — voice-realtime tool calling skeleton.
+"""voice-realtime tool calling — registry + safety classifications.
 
-Public surface kept minimal so providers' tool_call dispatch can light up
-without re-architecting. Each tool is a Python callable + a JSON schema
-description (provider tool-spec) + a safety classification.
+Each tool is a Python callable + a JSON schema description (provider tool-spec)
++ a safety classification.
 
-DEFER FROM PHASE 2: this module is loaded but `voice-realtime talk` does
-NOT yet wire tools into provider connect(). Phase 3.5 implementation is:
+Wired into the runtime in Sprint 1 (function calling foundation):
 
-    a) provider.connect(config, system_prompt, tools=ToolRegistry().as_specs())
-    b) recv_pump: on event.kind == "tool_call" → ToolRegistry.dispatch(...)
-       → provider.send_function_response(result)
-    c) Optional: surface tool_call as a terminal marker like ✂ barge-in.
+    a) cli.py builds a per-session ToolRegistry filtered by the persona's
+       `tools:` allowlist and passes `registry.provider_specs()` to
+       `provider.connect(tools=...)`.
+    b) Provider receives `tool_call` events from the model. cli.py's
+       _recv_pump dispatches via asyncio.to_thread, then calls
+       `provider.send_function_response(call_id, name, response)`.
+    c) control_server emits `tool.call` + `tool.result` events to UI observers.
 
-Until then, importing this module gives a working registry but no live
-wiring. Tests in tests/test_tool_registry.py exercise it.
+Tests: tests/test_tool_registry.py (registry behavior) +
+tests/test_provider_tool_wiring.py (provider + dispatch loop).
 """
 
 from __future__ import annotations

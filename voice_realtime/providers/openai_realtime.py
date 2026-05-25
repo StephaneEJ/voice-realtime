@@ -7,6 +7,7 @@ Audio I/O wiring lands in Milestone 2.
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import AsyncIterator
 
 import base64
@@ -18,7 +19,7 @@ from ..log import get_logger
 logger = get_logger("voice_realtime.openai")
 OPENAI_AUDIO_SAMPLE_RATE = 24000
 
-from .base import ProviderConfig, RealtimeEvent
+from .base import ProviderConfig, RealtimeEvent, ToolSpec
 
 DEFAULT_MODEL = "gpt-realtime-2"
 # 2026-05-21 NOTE: gpt-realtime-2 confirmed available via client.models.list().
@@ -49,8 +50,17 @@ class OpenAIRealtimeProvider:
         self._receiver_task: asyncio.Task[None] | None = None
         self._closed: bool = False
         self._audio_mode: bool = False
+        # call_id -> {"name": str, "arg_buf": str} — accumulates streamed
+        # function_call_arguments.delta chunks until the matching .done event.
+        self._pending_calls: dict[str, dict] = {}
 
-    async def connect(self, config: ProviderConfig, system_prompt: str, audio: bool = False) -> None:
+    async def connect(
+        self,
+        config: ProviderConfig,
+        system_prompt: str,
+        audio: bool = False,
+        tools: list[ToolSpec] | None = None,
+    ) -> None:
         self._client = AsyncOpenAI(api_key=config.api_key)
         self._conn_cm = self._client.realtime.connect(model=config.model or DEFAULT_MODEL)
         self._conn = await self._conn_cm.__aenter__()
@@ -62,6 +72,20 @@ class OpenAIRealtimeProvider:
             "output_modalities": ["audio"] if audio else ["text"],
             "instructions": system_prompt,
         }
+        if tools:
+            # OpenAI Realtime-2 tools shape: flat objects with explicit type.
+            # tool_choice="auto" lets the model decide when to call.
+            session_payload["tools"] = [
+                {
+                    "type": "function",
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": t.parameters,
+                }
+                for t in tools
+            ]
+            session_payload["tool_choice"] = "auto"
+            logger.debug(f"tools wired count={len(tools)} names={[t.name for t in tools]}")
         if audio:
             vad_name = config.vad or OPENAI_VAD_DEFAULT
             vad_preset = OPENAI_VAD_PRESETS.get(vad_name, OPENAI_VAD_PRESETS[OPENAI_VAD_DEFAULT])
@@ -148,6 +172,38 @@ class OpenAIRealtimeProvider:
                     # seconds. Always emit (no-op when no audio is buffered).
                     logger.debug("speech_started — emit model_interrupted")
                     await self._events.put(RealtimeEvent(kind="model_interrupted", data={}))
+                elif etype == "response.output_item.added":
+                    # A function_call item enters the response output. Grab the
+                    # call_id + name now so we can collect its streamed args.
+                    item = getattr(event, "item", None)
+                    if item is not None and getattr(item, "type", None) == "function_call":
+                        call_id = getattr(item, "call_id", "") or ""
+                        fn_name = getattr(item, "name", "") or ""
+                        if call_id:
+                            self._pending_calls[call_id] = {"name": fn_name, "arg_buf": ""}
+                            logger.debug(f"function_call started call_id={call_id!r} name={fn_name!r}")
+                elif etype == "response.function_call_arguments.delta":
+                    call_id = getattr(event, "call_id", "") or ""
+                    delta = getattr(event, "delta", "") or ""
+                    if call_id and call_id in self._pending_calls:
+                        self._pending_calls[call_id]["arg_buf"] += delta
+                elif etype == "response.function_call_arguments.done":
+                    call_id = getattr(event, "call_id", "") or ""
+                    pending = self._pending_calls.pop(call_id, None)
+                    # `arguments` on .done holds the full JSON string; prefer it
+                    # over the accumulated buffer in case any delta was missed.
+                    args_str = getattr(event, "arguments", None) or (pending or {}).get("arg_buf", "")
+                    fn_name = (pending or {}).get("name") or getattr(event, "name", "") or ""
+                    try:
+                        fn_args = json.loads(args_str) if args_str else {}
+                    except json.JSONDecodeError:
+                        logger.warning(f"function_call_arguments JSON decode failed call_id={call_id!r} raw={args_str!r}")
+                        fn_args = {}
+                    logger.debug(f"function_call done call_id={call_id!r} name={fn_name!r} args={fn_args!r}")
+                    await self._events.put(RealtimeEvent(
+                        kind="tool_call",
+                        data={"call_id": call_id, "name": fn_name, "args": fn_args},
+                    ))
                 elif etype == "response.done":
                     await self._events.put(RealtimeEvent(kind="session_closed", data={"reason": "response_done"}))
                 elif etype == "error":
@@ -186,6 +242,38 @@ class OpenAIRealtimeProvider:
             )
         except Exception:
             pass
+
+    async def send_function_response(
+        self,
+        call_id: str,
+        name: str,
+        response: dict,
+    ) -> None:
+        """Push a tool result back into the conversation and kick a new response.
+
+        Without the trailing `response.create()` the model would buffer the
+        function_call_output but never speak the synthesis aloud — confirmed
+        gotcha on Realtime-2 (see masterplan Sprint 1 notes).
+        """
+        if self._conn is None:
+            return
+        try:
+            output_str = json.dumps(response, ensure_ascii=False)
+        except (TypeError, ValueError) as exc:
+            logger.warning(f"send_function_response JSON encode failed name={name!r}: {exc!r}")
+            output_str = json.dumps({"error": "serialization_failed"})
+        try:
+            await self._conn.conversation.item.create(
+                item={
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": output_str,
+                }
+            )
+            await self._conn.response.create()
+            logger.debug(f"sent function_call_output call_id={call_id!r} name={name!r}")
+        except Exception as exc:
+            logger.warning(f"send_function_response failed call_id={call_id!r} name={name!r}: {exc!r}")
 
     async def send_audio_chunk(self, pcm16: bytes) -> None:
         assert self._conn is not None
