@@ -6,6 +6,7 @@
 //
 // Keyboard shortcuts: ⌘M mute, ⌘. stop.
 
+import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useMemo, useRef } from "react";
 import { Avatar } from "../components/Avatar";
 import { Bubble } from "../components/Bubble";
@@ -105,9 +106,27 @@ export function ActiveSessionView({
             <span className="mf-cap mf-mono mf-dim">{session.model}</span>
           </div>
         </div>
-        <StatusChip variant={muted ? "warn" : "live"}>
-          {muted ? "muted" : formatDuration(metrics.durationSeconds)}
-        </StatusChip>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <button
+            type="button"
+            title="Détacher dans une fenêtre overlay flottante (⌘⇧O)"
+            onClick={() => { void invoke("toggle_overlay_window"); }}
+            style={{
+              background: "transparent",
+              border: "1px solid var(--mf-border-2)",
+              color: "var(--mf-dim)",
+              borderRadius: 6,
+              padding: "4px 8px",
+              fontSize: 11,
+              cursor: "pointer",
+            }}
+          >
+            ↗ Overlay
+          </button>
+          <StatusChip variant={muted ? "warn" : "live"}>
+            {muted ? "muted" : formatDuration(metrics.durationSeconds)}
+          </StatusChip>
+        </div>
       </header>
 
       <div

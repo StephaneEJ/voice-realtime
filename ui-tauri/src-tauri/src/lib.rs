@@ -12,7 +12,7 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager,
+    AppHandle, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 
 // #[cfg(target_os = "macos")]
@@ -160,9 +160,37 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![spawn_cli_session])
+        .invoke_handler(tauri::generate_handler![spawn_cli_session, toggle_overlay_window])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Open the always-on-top overlay window if it doesn't exist, close it if
+/// it does. The overlay reuses the same Vite bundle (index.html?overlay=1)
+/// and connects to the same control_server WS as the main window — observer
+/// mode only, no audio path.
+#[tauri::command]
+async fn toggle_overlay_window(app: AppHandle) -> Result<(), String> {
+    if let Some(existing) = app.get_webview_window("overlay") {
+        existing.close().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    WebviewWindowBuilder::new(
+        &app,
+        "overlay",
+        WebviewUrl::App("index.html?overlay=1".into()),
+    )
+    .title("voice-realtime — overlay")
+    .inner_size(360.0, 420.0)
+    .min_inner_size(280.0, 320.0)
+    .decorations(false)
+    .transparent(true)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .resizable(true)
+    .build()
+    .map_err(|e| format!("overlay window create failed: {}", e))?;
+    Ok(())
 }
 
 fn toggle_window(app: &AppHandle) {
