@@ -701,6 +701,16 @@ def talk(
         "--aec/--no-aec",
         help="Acoustic echo cancellation — required for chat without headphones. Forces mic rate to 16 kHz (Speex MDF). Persona frontmatter 'aec: true' is the recommended opt-in path.",
     ),
+    aec_delay_ms: int = typer.Option(
+        60,
+        "--aec-delay-ms",
+        help="AEC playback->capture latency to compensate (ms). Tune up for USB mics (80-120) and down for built-in MBP mic (40-60).",
+    ),
+    aec_tail_ms: int = typer.Option(
+        100,
+        "--aec-tail-ms",
+        help="AEC filter tail length (ms). Speex MDF default 100 ms covers most living rooms; raise to 200 in echoey spaces.",
+    ),
 ) -> None:
     """M2-M4: duplex audio session with context injection, cost tracking, vault save."""
     try:
@@ -839,6 +849,8 @@ def talk(
             tools_registry=session_registry,
             ask_before_acting=(persona_obj.ask_before_acting if persona_obj else False),
             aec_enabled=aec,
+            aec_delay_ms=aec_delay_ms,
+            aec_tail_ms=aec_tail_ms,
         )
     )
 
@@ -872,6 +884,8 @@ async def _run_talk(
     tools_registry: ToolRegistry | None = None,
     ask_before_acting: bool = False,
     aec_enabled: bool = False,
+    aec_delay_ms: int = 60,
+    aec_tail_ms: int = 100,
 ) -> None:
     # Lazy import audio to avoid PortAudio errors at module load
     from .audio.microphone import MicrophoneStream
@@ -1017,8 +1031,15 @@ async def _run_talk(
     if aec_enabled:
         try:
             from .audio.aec import EchoCanceller
-            echo_canceller = EchoCanceller(delay_ms=60, tail_ms=100, enable_preprocess=True)
-            logger.info("AEC enabled — Speex MDF @ 16 kHz, delay 60 ms, tail 100 ms")
+            echo_canceller = EchoCanceller(
+                delay_ms=aec_delay_ms,
+                tail_ms=aec_tail_ms,
+                enable_preprocess=True,
+            )
+            logger.info(
+                "AEC enabled — Speex MDF @ 16 kHz, delay %d ms, tail %d ms",
+                aec_delay_ms, aec_tail_ms,
+            )
         except ImportError as exc:
             console.print(
                 f"[red]AEC requested but pyaec not installed: {exc}. "
