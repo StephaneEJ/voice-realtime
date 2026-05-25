@@ -1488,6 +1488,21 @@ async def _run_talk(
                         await attached.emit({"ev": "model.interrupted"})
                         if latency.last_ttfi_ms is not None:
                             await attached.emit({"ev": "ttfi", "ms": round(latency.last_ttfi_ms, 1)})
+                elif event.kind == "cost_update":
+                    # Provider-reported real tokens. mode="cumulative" replaces
+                    # the running totals (Gemini Live); mode="delta" adds them
+                    # to the totals (OpenAI Realtime per-response).
+                    mode = event.data.get("mode", "cumulative")
+                    t_in = int(event.data.get("tokens_in", 0) or 0)
+                    t_out = int(event.data.get("tokens_out", 0) or 0)
+                    if mode == "delta":
+                        tracker.update_tokens_delta(t_in, t_out)
+                    else:
+                        tracker.update_tokens_cumulative(t_in, t_out)
+                    logger.debug("cost_update mode=%s in=%d out=%d total=%d",
+                                 mode, tracker.estimated_tokens_in,
+                                 tracker.estimated_tokens_out,
+                                 tracker.estimated_tokens_total)
                 elif event.kind == "error":
                     logger.error("Server error: %s", event.data)
                     console.print(f"\n[red]Server error: {event.data}[/red]")

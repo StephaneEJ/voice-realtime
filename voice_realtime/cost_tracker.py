@@ -42,6 +42,10 @@ class CostTracker:
     hard_stop_cost_usd: float = 3.00
     max_duration_seconds: float = 900.0  # 15 min default
     _warned: bool = False
+    # Real provider usage (filled in when the provider emits cost_update
+    # events). Falls back to the elapsed-time proxy when None.
+    real_tokens_in: int | None = None
+    real_tokens_out: int | None = None
 
     def __post_init__(self) -> None:
         if self.hourly_rate_usd <= 0:
@@ -59,29 +63,48 @@ class CostTracker:
     def estimated_cost_usd(self) -> float:
         return (self.elapsed_seconds / 3600.0) * self.hourly_rate_usd
 
-    # Token estimates — proxy values derived from elapsed time, NOT real
-    # provider usage_metadata. Both providers stream tokens but neither
-    # exposes a clean realtime counter today; we approximate at ~50 tok/s
-    # per direction (audio tokenization is roughly ~3000 tokens per minute
-    # for mid-quality speech). Replace with provider-reported counts when
-    # OpenAI Realtime `response.done` usage / Gemini usage_metadata wiring
-    # lands (separate sprint).
+    # Proxy values derived from elapsed time, used only as a fallback before
+    # any real provider counts have come in. Once update_tokens_cumulative or
+    # update_tokens_delta is called, ``real_tokens_*`` win.
     _TOKENS_PER_SECOND = 50.0
     # Conservative model context window proxy — used by UI as denominator.
     # Gemini Live: 1M tokens. OpenAI Realtime-2: 128k tokens.
     _CONTEXT_WINDOW_BY_PROVIDER = {"gemini": 1_000_000, "openai": 128_000}
 
     @property
+    def has_real_tokens(self) -> bool:
+        return self.real_tokens_in is not None or self.real_tokens_out is not None
+
+    @property
     def estimated_tokens_in(self) -> int:
+        if self.real_tokens_in is not None:
+            return self.real_tokens_in
         return int(self.elapsed_seconds * self._TOKENS_PER_SECOND)
 
     @property
     def estimated_tokens_out(self) -> int:
+        if self.real_tokens_out is not None:
+            return self.real_tokens_out
         return int(self.elapsed_seconds * self._TOKENS_PER_SECOND)
 
     @property
     def estimated_tokens_total(self) -> int:
         return self.estimated_tokens_in + self.estimated_tokens_out
+
+    def update_tokens_cumulative(self, tokens_in: int, tokens_out: int) -> None:
+        """Replace the running token totals with provider-reported cumulative
+        values. Used by providers (Gemini Live) whose ``usage_metadata``
+        carries session-wide running counts."""
+        self.real_tokens_in = max(int(tokens_in), 0)
+        self.real_tokens_out = max(int(tokens_out), 0)
+
+    def update_tokens_delta(self, tokens_in: int, tokens_out: int) -> None:
+        """Add to the running token totals from a provider that reports
+        per-response usage (OpenAI Realtime's ``response.done`` usage block)."""
+        base_in = self.real_tokens_in or 0
+        base_out = self.real_tokens_out or 0
+        self.real_tokens_in = base_in + max(int(tokens_in), 0)
+        self.real_tokens_out = base_out + max(int(tokens_out), 0)
 
     @property
     def context_window_tokens(self) -> int:

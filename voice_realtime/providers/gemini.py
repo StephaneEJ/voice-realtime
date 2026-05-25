@@ -204,6 +204,31 @@ class GeminiProvider:
         conn_dead = False
         try:
             async for response in self._session.receive():
+                # 0. Usage metadata (cumulative session totals on LiveServerMessage).
+                # When present, replace the running real-tokens totals on the
+                # CostTracker via a cost_update event consumed by the CLI.
+                usage = getattr(response, "usage_metadata", None)
+                if usage is not None:
+                    tokens_in = (
+                        getattr(usage, "prompt_token_count", None)
+                        or getattr(usage, "input_token_count", None)
+                        or 0
+                    )
+                    tokens_out = (
+                        getattr(usage, "response_token_count", None)
+                        or getattr(usage, "output_token_count", None)
+                        or 0
+                    )
+                    if tokens_in or tokens_out:
+                        await self._events.put(RealtimeEvent(
+                            kind="cost_update",
+                            data={
+                                "tokens_in": int(tokens_in),
+                                "tokens_out": int(tokens_out),
+                                "mode": "cumulative",
+                            },
+                        ))
+
                 # 1. Audio bytes direct via response.data (Gemini Live convention for AUDIO modality)
                 audio_data = getattr(response, "data", None)
                 if audio_data:

@@ -205,6 +205,23 @@ class OpenAIRealtimeProvider:
                         data={"call_id": call_id, "name": fn_name, "args": fn_args},
                     ))
                 elif etype == "response.done":
+                    # Per-response usage block: {"input_tokens", "output_tokens",
+                    # "total_tokens"}. Reported once per response.done, so we
+                    # add (delta mode) to the running totals on the tracker.
+                    resp_obj = getattr(event, "response", None)
+                    usage = getattr(resp_obj, "usage", None) if resp_obj is not None else None
+                    if usage is not None:
+                        tokens_in = getattr(usage, "input_tokens", None) or 0
+                        tokens_out = getattr(usage, "output_tokens", None) or 0
+                        if tokens_in or tokens_out:
+                            await self._events.put(RealtimeEvent(
+                                kind="cost_update",
+                                data={
+                                    "tokens_in": int(tokens_in),
+                                    "tokens_out": int(tokens_out),
+                                    "mode": "delta",
+                                },
+                            ))
                     await self._events.put(RealtimeEvent(kind="session_closed", data={"reason": "response_done"}))
                 elif etype == "error":
                     err = getattr(event, "error", None)
