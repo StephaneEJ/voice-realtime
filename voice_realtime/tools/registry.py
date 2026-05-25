@@ -231,7 +231,16 @@ def _tool_note_action(text: str) -> ToolResult:
 
 
 def default_registry() -> ToolRegistry:
-    """Return a registry pre-loaded with the safe read + 1 vault-write tool."""
+    """Return a registry pre-loaded with the built-in tools.
+
+    Sprint 1: search_vault (RO), read_file (RO), note_action (WRITE).
+    Sprint 2: vault_write (WRITE), web_search (RO).
+    """
+    # Imported lazily inside the function so the registry module stays
+    # importable even if optional deps for one tool are missing.
+    from .vault_write import VAULT_WRITE_SPEC
+    from .web_search import WEB_SEARCH_SPEC
+
     r = ToolRegistry()
     r.register(ToolSpec(
         name="search_vault",
@@ -274,4 +283,6 @@ def default_registry() -> ToolRegistry:
         },
         handler=_tool_note_action,
     ))
+    r.register(VAULT_WRITE_SPEC)
+    r.register(WEB_SEARCH_SPEC)
     return r

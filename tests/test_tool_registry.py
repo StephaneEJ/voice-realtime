@@ -78,9 +78,9 @@ def test_registry_as_specs_shape() -> None:
     r = default_registry()
     specs = r.as_specs()
     assert isinstance(specs, list)
-    assert len(specs) == 3
+    assert len(specs) == 5
     names = {s["name"] for s in specs}
-    assert names == {"search_vault", "read_file", "note_action"}
+    assert names == {"search_vault", "read_file", "note_action", "vault_write", "web_search"}
     for s in specs:
         assert "description" in s
         assert "parameters" in s
@@ -91,6 +91,8 @@ def test_default_registry_safety_levels() -> None:
     assert r.get("search_vault").safety == ToolSafetyLevel.READ_ONLY
     assert r.get("read_file").safety == ToolSafetyLevel.READ_ONLY
     assert r.get("note_action").safety == ToolSafetyLevel.WRITE_USER_SCOPE
+    assert r.get("vault_write").safety == ToolSafetyLevel.WRITE_USER_SCOPE
+    assert r.get("web_search").safety == ToolSafetyLevel.READ_ONLY
 
 
 def test_read_file_rejects_outside_vault(tmp_path) -> None:
