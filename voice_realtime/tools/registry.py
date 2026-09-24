@@ -197,7 +197,7 @@ def _tool_note_action(text: str) -> ToolResult:
     if not text.strip():
         return ToolResult(ok=False, error="empty text")
     vault = Path.home() / "OBSIDIAN" / "2ND_CERVEAU"
-    life_phases = vault / "2 CASQUETTES" / "Life Phases"
+    life_phases = vault / "2 CASQUETTES" / "Sur ma vie" / "Life Phases"
     if not life_phases.exists():
         return ToolResult(ok=False, error="life phases dir not found")
     # Find active phase by `status: active` in *Intention*.md

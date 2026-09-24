@@ -14,7 +14,7 @@ from datetime import date
 from pathlib import Path
 
 VAULT_ROOT = Path.home() / "OBSIDIAN" / "2ND_CERVEAU"
-LIFE_PHASES_DIR = VAULT_ROOT / "2 CASQUETTES" / "Life Phases"
+LIFE_PHASES_DIR = VAULT_ROOT / "2 CASQUETTES" / "Sur ma vie" / "Life Phases"
 PROJECTS_DIR = VAULT_ROOT / "1 PROJETS"
 
 DEFAULT_MAX_CHARS = 12000
