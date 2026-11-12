@@ -35,7 +35,7 @@ voice-realtime talk \
 
 ```
 voice_realtime/
-├── providers/           # base.py (Protocol) + openai_realtime.py + gemini.py
+├── providers/           # base.py (Protocol) + openai_realtime.py + gemini.py + chain*.py (mode chaîne)
 ├── audio/               # microphone.py + playback.py (sounddevice PCM16)
 ├── cli.py               # status / hello / talk / preview-voices / summarize / stats
 ├── config.py            # ~/.voice-realtime/secrets.env loader + budget
@@ -61,6 +61,18 @@ docs/DESIGN.md           # décisions architecturales
 |----------|---------------|----------------|-------------|
 | Gemini   | `gemini-2.5-flash-native-audio-latest` | ~$1.40/h | Charon |
 | OpenAI   | `gpt-realtime-2` (backup : `gpt-realtime-mini` 4× moins cher) | $5/h | (selon clé) |
+
+### Mode chaîne (`--provider chain`, N2)
+
+Reconnaissance vocale → modèle API au choix → synthèse vocale, derrière le même protocole `providers` : VAD locale (`Endpointer`), synthèse lancée phrase par phrase, coupure de parole, appels d'outils (dont ceux de l'orchestrateur). Aucun étage par défaut : les trois sont à préciser (option ou variable `VOICE_REALTIME_CHAIN_STT` / `_LLM` / `_TTS`).
+
+| Étage | Spécifications |
+|---|---|
+| `--chain-stt` | `whisper-cpp[:modele.bin]` (local), `openai:<modele>[@url]` |
+| `--chain-llm` | `openai:<modele>[@url]` (OpenAI et API compatibles), `anthropic:<modele>`, `echo` (essai) |
+| `--chain-tts` | `say[:voix]` (macOS, local), `openai:<modele>[:voix][@url]` |
+
+Rejouer un enregistrement sans micro : `voice-realtime chain-rejouer tests/fixtures/chain/deux_phrases.wav --chain-stt "script:phrase 1|phrase 2" --chain-llm echo --chain-tts say -o sortie.wav` (aucun réseau).
 
 ## Flags `talk`
 
