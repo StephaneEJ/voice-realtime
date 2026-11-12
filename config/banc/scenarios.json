@@ -1,0 +1,32 @@
+{
+  "manifeste": "../../tests/fixtures/chain/enregistrements.json",
+  "scenarios": [
+    {
+      "id": "outils-et-coupure",
+      "enregistrement": "../../tests/fixtures/chain/deux_phrases.wav",
+      "langue": "fr",
+      "outils_attendus": ["list_sessions", "get_last_response"],
+      "coupure_ms": 3430,
+      "description": "Deux demandes en français : lister les sessions puis lire le dernier retour ; la seconde phrase commence pendant la réponse à la première (coupure attendue)."
+    },
+    {
+      "id": "phrase-courte",
+      "enregistrement": "../../tests/fixtures/chain/coupure.wav",
+      "langue": "fr",
+      "description": "Énoncé bref « Attends, arrête-toi. » : latence sur une phrase courte, aucune action attendue."
+    },
+    {
+      "id": "mot-arret",
+      "enregistrement": "../../tests/fixtures/chain/killchat.wav",
+      "langue": "fr",
+      "mot_arret": true,
+      "description": "Mot d'arrêt « Killchat » : doit être reconnu par la règle de la CLI."
+    },
+    {
+      "id": "voix-humaine-en",
+      "enregistrement": "../../tests/fixtures/chain/jfk.wav",
+      "langue": "en",
+      "description": "Voix humaine réelle (domaine public), en anglais : robustesse de la détection de parole ; le taux d'erreur n'y mesure pas le français."
+    }
+  ]
+}

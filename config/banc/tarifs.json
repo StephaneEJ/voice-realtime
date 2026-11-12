@@ -1,0 +1,21 @@
+{
+  "commentaire": "Prix en dollars. null = inconnu : le coût n'est pas inventé et tout passage payant est refusé tant que le prix manque. Les prix « fictif » servent seulement aux étages simulés. Prix réels à relever sur les pages officielles, datés, avant tout passage payant. Les fournisseurs temps réel reprennent la grille horaire de voice_realtime/cost_tracker.py.",
+  "etages": {
+    "stt": {
+      "simule": {"usd_par_minute": 0.006, "fictif": true},
+      "script": {"usd_par_minute": 0},
+      "whisper-cpp": {"usd_par_minute": 0},
+      "openai:gpt-4o-mini-transcribe": {"usd_par_minute": null, "source": "à relever"}
+    },
+    "llm": {
+      "simule": {"usd_par_million_entree": 0.25, "usd_par_million_sortie": 1.25, "fictif": true},
+      "echo": {"usd_par_million_entree": 0, "usd_par_million_sortie": 0},
+      "anthropic:claude-haiku-5-5": {"usd_par_million_entree": null, "usd_par_million_sortie": null, "source": "à relever"}
+    },
+    "tts": {
+      "simule": {"usd_par_million_caracteres": 15, "fictif": true},
+      "say": {"usd_par_million_caracteres": 0},
+      "openai:gpt-4o-mini-tts": {"usd_par_million_caracteres": null, "source": "à relever"}
+    }
+  }
+}

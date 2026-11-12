@@ -425,6 +425,65 @@ def chain_rejouer(
     typer.echo(_json.dumps([asdict(m) for m in res.metrics], ensure_ascii=False, indent=2))
 
 
+_BANC_CONFIG = Path(__file__).resolve().parent.parent / "config" / "banc"
+
+
+@app.command()
+def banc(
+    candidats: Path = typer.Option(_BANC_CONFIG / "candidats.json", "--candidats", help="Fichier JSON des candidats"),
+    scenarios: Path = typer.Option(_BANC_CONFIG / "scenarios.json", "--scenarios", help="Fichier JSON des scénarios"),
+    tarifs: Path = typer.Option(_BANC_CONFIG / "tarifs.json", "--tarifs", help="Grille de prix JSON"),
+    sortie: Path | None = typer.Option(None, "--sortie", "-o", help="Dossier du rapport (défaut : ~/.voice-realtime/banc/<horodatage>)"),
+    seulement: list[str] = typer.Option([], "--seulement", help="Ne jouer que ces candidats (répétable)"),
+    facteur: float = typer.Option(1.0, "--facteur", help="Échelle des latences des étages simulés (1 = profils tels quels)"),
+    payant: bool = typer.Option(False, "--payant", help="Autoriser les candidats payants (budget exigé, jamais la nuit)"),
+    budget_usd: float = typer.Option(0.0, "--budget-usd", help="Budget validé par Stéphane pour un passage payant"),
+) -> None:
+    """Banc d'essai N3 : latence, français, coupure, outils et coût à l'heure, rapport Markdown et JSON.
+
+    Par défaut **à blanc** : seuls les étages simulés ou locaux gratuits sont
+    joués, réseau coupé hors boucle locale ; les candidats payants sont chiffrés
+    sans être joués. `--payant --budget-usd X` exige un prix connu pour chaque
+    étage, un majorant sous le budget et une heure hors 22:00-07:00.
+    """
+    from datetime import datetime
+
+    from .banc.garde import PARIS, AutorisationPayante, PassageRefuse
+    from .banc.harnais import CandidatErreur, charger_candidats, executer_banc
+    from .banc.rapport import ecrire
+    from .banc.scenarios import ScenarioErreur, charger_scenarios
+    from .banc.tarifs import GrilleTarifs
+
+    try:
+        liste = charger_candidats(candidats)
+        if seulement:
+            inconnus = sorted(set(seulement) - {c.id for c in liste})
+            if inconnus:
+                raise CandidatErreur(f"candidats inconnus : {', '.join(inconnus)}")
+            liste = [c for c in liste if c.id in seulement]
+        jeu = charger_scenarios(scenarios)
+        grille = GrilleTarifs.charger(tarifs)
+    except (CandidatErreur, ScenarioErreur, OSError, ValueError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    autorisation = None
+    if payant:
+        try:
+            load_config()  # clés des candidats payants, depuis le fichier de secrets
+        except FileNotFoundError:
+            pass
+        autorisation = AutorisationPayante(budget_usd=budget_usd, autorise=True)
+    try:
+        rapport = asyncio.run(executer_banc(liste, jeu, grille, autorisation=autorisation, facteur=facteur, journal=typer.echo))
+    except PassageRefuse as exc:
+        console.print(f"[red]Passage refusé : {exc}[/red]")
+        raise typer.Exit(2)
+    dossier = sortie or Path.home() / ".voice-realtime" / "banc" / datetime.now(PARIS).strftime("%Y-%m-%d-%H%M%S")
+    md, js = ecrire(rapport, dossier)
+    typer.echo(f"Rapport : {md}")
+    typer.echo(f"Données : {js}")
+
+
 @app.command()
 def telephone(
     provider: str = typer.Option("", "--provider", "-p", help="chain | gemini | openai (obligatoire : aucun fournisseur par défaut avant N3)."),

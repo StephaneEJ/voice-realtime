@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
@@ -23,6 +24,10 @@ class ReplayResult:
     events: list[RealtimeEvent] = field(default_factory=list)
     audio_out: bytes = b""
     metrics: list[TurnMetrics] = field(default_factory=list)
+    # Pour chaque événement, au même rang : instant dans l'enregistrement
+    # (secondes d'audio déjà poussées) et horloge monotone réelle (banc N3).
+    instants: list[float] = field(default_factory=list)
+    horodatages: list[float] = field(default_factory=list)
 
     def texts(self, kind: str) -> list[str]:
         return [e.data.get("text", "") for e in self.events if e.kind == kind]
@@ -57,6 +62,7 @@ async def replay(
     """
     result = ReplayResult()
     vclock = {"t": 0.0}
+    debut = time.monotonic()
     if not realtime:
         provider.clock = lambda: vclock["t"]
     await provider.connect(
@@ -69,6 +75,9 @@ async def replay(
     async def pump() -> None:
         async for ev in provider.receive_events():
             result.events.append(ev)
+            maintenant = time.monotonic()
+            result.horodatages.append(maintenant)
+            result.instants.append(vclock["t"] if not realtime else maintenant - debut)
             if ev.kind == "audio_chunk_out":
                 result.audio_out += ev.data.get("pcm16", b"")
             elif ev.kind == "tool_call":
