@@ -181,6 +181,18 @@ async def test_nom_public_exige_un_verrou_local() -> None:
         ServeurTelephone(lambda: None, prefixe="voix")
 
 
+@pytest.mark.parametrize("hote", ["0.0.0.0", "::", "192.168.1.20", "macbook.local", ""])
+async def test_ecoute_hors_boucle_locale_exige_un_verrou(hote) -> None:
+    with pytest.raises(ValueError, match="hors boucle locale"):
+        ServeurTelephone(lambda: None, hote=hote)
+    ServeurTelephone(lambda: None, hote=hote, jeton=JETON)  # verrou présent : accepté
+
+
+@pytest.mark.parametrize("hote", ["127.0.0.1", "127.0.0.2", "localhost", "::1", "[::1]"])
+async def test_boucle_locale_sans_verrou_acceptee(hote) -> None:
+    ServeurTelephone(lambda: None, hote=hote)
+
+
 JETON = "j" * 40
 
 
@@ -368,6 +380,15 @@ def test_commande_nom_public_sans_access_refusee(cli_isolee) -> None:
     ])
     assert resultat.exit_code == 1
     assert "Access" in resultat.output
+
+
+def test_commande_ecoute_reseau_sans_verrou_refusee(cli_isolee) -> None:
+    resultat = CliRunner().invoke(cli_isolee, [
+        "telephone", "--provider", "chain", "--chain-stt", "script:a", "--chain-llm", "echo",
+        "--chain-tts", "say", "--outils", "", "--hote", "0.0.0.0", "--port", "1",
+    ])
+    assert resultat.exit_code == 1
+    assert "hors boucle locale" in resultat.output
 
 
 def test_page_reference_uniquement_des_fichiers_servis() -> None:

@@ -497,7 +497,7 @@ def telephone(
         "list_sessions,get_state_summary,get_last_response,send_instruction,get_instruction_status",
         "--outils", help="Outils exposés au modèle, séparés par des virgules ; vide = aucun.",
     ),
-    hote: str = typer.Option("127.0.0.1", "--hote", help="Adresse d'écoute (boucle locale : le tunnel s'y connecte)."),
+    hote: str = typer.Option("127.0.0.1", "--hote", help="Adresse d'écoute (boucle locale : le tunnel s'y connecte). Hors boucle locale : Access ou --jeton-fichier exigé."),
     port: int = typer.Option(7720, "--port", help="Port HTTP et WebSocket."),
     nom_public: list[str] = typer.Option([], "--nom-public", help="Nom d'hôte public (répétable). Exige Access ou --jeton-fichier."),
     prefixe: str = typer.Option("", "--prefixe", help="Chemin public sous lequel la page est servie (ex. /voix)."),
