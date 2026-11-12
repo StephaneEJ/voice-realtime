@@ -426,6 +426,88 @@ def chain_rejouer(
 
 
 @app.command()
+def telephone(
+    provider: str = typer.Option("", "--provider", "-p", help="chain | gemini | openai (obligatoire : aucun fournisseur par défaut avant N3)."),
+    model: str = typer.Option("", "--model", help="Modèle (gemini / openai)."),
+    voice: str = typer.Option("", "--voice", help="Voix (gemini / openai)."),
+    vad: str = typer.Option("balanced", "--vad", help="reactive | balanced | patient | very-patient"),
+    chain_stt: str = typer.Option("", "--chain-stt", envvar="VOICE_REALTIME_CHAIN_STT", help="Mode chaîne : reconnaissance vocale."),
+    chain_llm: str = typer.Option("", "--chain-llm", envvar="VOICE_REALTIME_CHAIN_LLM", help="Mode chaîne : modèle."),
+    chain_tts: str = typer.Option("", "--chain-tts", envvar="VOICE_REALTIME_CHAIN_TTS", help="Mode chaîne : synthèse vocale."),
+    outils: str = typer.Option(
+        "list_sessions,get_state_summary,get_last_response,send_instruction,get_instruction_status",
+        "--outils", help="Outils exposés au modèle, séparés par des virgules ; vide = aucun.",
+    ),
+    hote: str = typer.Option("127.0.0.1", "--hote", help="Adresse d'écoute (boucle locale : le tunnel s'y connecte)."),
+    port: int = typer.Option(7720, "--port", help="Port HTTP et WebSocket."),
+    nom_public: list[str] = typer.Option([], "--nom-public", help="Nom d'hôte public (répétable). Exige Access ou --jeton-fichier."),
+    prefixe: str = typer.Option("", "--prefixe", help="Chemin public sous lequel la page est servie (ex. /voix)."),
+    jeton_fichier: Path | None = typer.Option(None, "--jeton-fichier", help="Fichier 600 du jeton local exigé en Authorization: Bearer (relais du Worker)."),
+    access_equipe: str = typer.Option("", "--access-equipe", envvar="VOICE_REALTIME_ACCESS_EQUIPE", help="Équipe Cloudflare Access (<equipe>.cloudflareaccess.com)."),
+    access_aud: str = typer.Option("", "--access-aud", envvar="VOICE_REALTIME_ACCESS_AUD", help="Étiquette AUD de l'application Access."),
+    access_adresse: list[str] = typer.Option([], "--access-adresse", help="Adresse autorisée (répétable)."),
+    max_minutes: float = typer.Option(15.0, "--max-minutes", help="Durée maximale d'un appel."),
+    cost_cap: float = typer.Option(3.0, "--cost-cap", help="Plafond de coût d'un appel (USD)."),
+    salutation: bool = typer.Option(True, "--salutation/--sans-salutation", help="Envoyer « Démarre. » à l'ouverture."),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Journal aussi sur la sortie d'erreur."),
+) -> None:
+    """N4 — page téléphone : sert la page et le canal audio WebSocket d'un appel.
+
+    Essai local sans réseau : `voice-realtime telephone --provider chain
+    --chain-stt "script:Bonjour.|Liste mes sessions." --chain-llm echo --chain-tts say:Thomas --outils ""`
+    puis ouvrir http://localhost:7720/ dans un navigateur du Mac.
+    """
+    from .telephone.acces import VerificateurAcces
+    from .telephone.configuration import ConfigurationTelephoneErreur, ReglagesTelephone, fabrique_appel
+    from .telephone.serveur import ServeurTelephone
+
+    try:
+        load_config()  # clés du fichier de secrets dans l'environnement
+    except FileNotFoundError:
+        pass
+    setup_logging(provider=f"telephone-{provider or 'aucun'}", verbose=verbose)
+    reglages = ReglagesTelephone(
+        provider=provider, model=model, voice=voice, vad=vad,
+        chain_stt=chain_stt, chain_llm=chain_llm, chain_tts=chain_tts,
+        outils=tuple(n.strip() for n in outils.split(",") if n.strip()),
+        salutation=salutation, max_minutes=max_minutes, cout_max_usd=cost_cap,
+    )
+    try:
+        fabrique = fabrique_appel(reglages)
+        acces = None
+        if access_equipe or access_aud or access_adresse:
+            acces = VerificateurAcces.construire(access_equipe, access_aud, access_adresse)
+            acces.charger_cles(force=True)
+        jeton = None
+        if jeton_fichier is not None:
+            if jeton_fichier.stat().st_mode & 0o077:
+                raise ValueError(f"{jeton_fichier} doit être en 600 (lisible par toi seul)")
+            jeton = jeton_fichier.read_text(encoding="utf-8").strip()
+        serveur = ServeurTelephone(
+            fabrique, hote=hote, port=port, noms_publics=tuple(nom_public), acces=acces,
+            jeton=jeton, prefixe=prefixe,
+        )
+    except (ConfigurationTelephoneErreur, ValueError, OSError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    except Exception as exc:  # JWKS illisible au démarrage
+        console.print(f"[red]Access : clés publiques illisibles ({type(exc).__name__})[/red]")
+        raise typer.Exit(1)
+
+    async def _servir() -> None:
+        port_effectif = await serveur.demarrer()
+        console.print(f"[cyan]Page téléphone : http://localhost:{port_effectif}{serveur.prefixe}/[/cyan]")
+        for nom in nom_public:
+            console.print(f"[cyan]Nom public accepté : {nom}[/cyan]")
+        await serveur.servir()
+
+    try:
+        asyncio.run(_servir())
+    except KeyboardInterrupt:
+        console.print("\n[dim]page téléphone arrêtée[/dim]")
+
+
+@app.command()
 def serve(
     host: str = typer.Option("127.0.0.1", "--host", help="Host to bind. Default: loopback only."),
     port: int = typer.Option(7711, "--port", help="WS port. Schema imposed by design handoff."),

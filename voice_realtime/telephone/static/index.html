@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#101418">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Jarvis">
+  <title>Jarvis voix</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icone.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="telephone.css">
+  <script src="telephone.js" defer></script>
+</head>
+<body>
+  <main class="appli">
+    <header class="tete">
+      <h1>Jarvis</h1>
+      <p id="fournisseur" class="discret">hors ligne</p>
+    </header>
+
+    <section class="centre" aria-live="polite">
+      <div id="anneau" class="anneau" data-etat="repos">
+        <button id="appel" class="appel" type="button" aria-label="Appeler">
+          <span id="appel-libelle">Appeler</span>
+        </button>
+      </div>
+      <p id="etat" class="etat">Prêt</p>
+      <div class="niveaux" aria-hidden="true">
+        <span class="niveau-libelle">toi</span><span class="barre"><span id="niveau-micro"></span></span>
+        <span class="niveau-libelle">Jarvis</span><span class="barre"><span id="niveau-voix"></span></span>
+      </div>
+    </section>
+
+    <section class="commandes">
+      <button id="muet" class="secondaire" type="button" aria-pressed="false" disabled>Muet</button>
+      <span id="duree" class="discret">00:00</span>
+    </section>
+
+    <section class="journal" aria-label="Transcription">
+      <ol id="journal"></ol>
+    </section>
+
+    <form id="saisie" class="saisie" autocomplete="off">
+      <input id="saisie-texte" type="text" placeholder="Écrire à Jarvis" maxlength="2000" enterkeyhint="send" disabled>
+      <button id="saisie-envoi" class="secondaire" type="submit" disabled>Envoyer</button>
+    </form>
+
+    <p id="avertissement" class="avertissement" hidden></p>
+  </main>
+</body>
+</html>
