@@ -33,10 +33,11 @@ from voice_realtime.tools.registry import ToolRegistry
 def test_provider_specs_returns_base_ToolSpec_instances() -> None:
     r = default_registry()
     specs = r.provider_specs()
-    assert len(specs) == 5
+    assert len(specs) == 10
     assert all(isinstance(s, ToolSpec) for s in specs)
     names = {s.name for s in specs}
-    assert names == {"search_vault", "read_file", "note_action", "vault_write", "web_search"}
+    assert names == {"search_vault", "read_file", "note_action", "vault_write", "web_search",
+                     "list_sessions", "get_state_summary", "get_last_response", "send_instruction", "get_instruction_status"}
 
 
 def test_subset_filters_by_name() -> None:

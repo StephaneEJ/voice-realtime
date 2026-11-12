@@ -334,6 +334,48 @@ def status() -> None:
         console.print(f"  [cyan]{spark}[/cyan]")
 
 
+ORCHESTRATEUR_LECTURES = ("list_sessions", "get_state_summary", "get_last_response", "get_instruction_status")
+
+
+@app.command()
+def orchestrateur(
+    outil: str = typer.Argument(..., help="Outil en lecture : " + ", ".join(ORCHESTRATEUR_LECTURES)),
+    argument: list[str] = typer.Option(
+        [], "--arg", "-a", help="Argument cle=valeur (valeur JSON si possible), répétable"
+    ),
+) -> None:
+    """Appelle un outil en lecture de l'orchestrateur vocal (client MCP N1) et affiche son JSON.
+
+    `send_instruction` n'est pas exposé ici : il passe par le modèle vocal et le garde-fou serveur.
+    """
+    import json as _json
+
+    from .tools.orchestrateur import ClientOrchestrateur, ErreurOrchestrateurClient
+
+    if outil not in ORCHESTRATEUR_LECTURES:
+        console.print(f"[red]Outil inconnu ou non lecture seule : {outil}[/red]")
+        raise typer.Exit(2)
+    arguments: dict = {}
+    for brut in argument:
+        cle, sep, valeur = brut.partition("=")
+        if not sep:
+            console.print(f"[red]Argument attendu sous la forme cle=valeur : {brut}[/red]")
+            raise typer.Exit(2)
+        try:
+            arguments[cle] = _json.loads(valeur)
+        except ValueError:
+            arguments[cle] = valeur
+    client = ClientOrchestrateur.depuis_environnement()
+    try:
+        donnees = client.appeler_outil(outil, arguments)
+    except ErreurOrchestrateurClient as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    finally:
+        client.fermer()
+    typer.echo(_json.dumps(donnees, ensure_ascii=False, indent=2))
+
+
 @app.command()
 def serve(
     host: str = typer.Option("127.0.0.1", "--host", help="Host to bind. Default: loopback only."),
