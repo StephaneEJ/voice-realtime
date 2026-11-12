@@ -19,3 +19,9 @@ Historique des clôtures de session (ajout seul). L'historique antérieur au 12/
 - **Preuves :** `docs/preuves/nuit-2026-11-12/B3.md` ; 303 tests verts sans réseau (42 nouveaux, réseau bloqué pour les vérifier) sur enregistrements `say` et `jfk.wav` ; chaîne locale rejouée de bout en bout avec la vraie voix `say`.
 - **Décisions :** aucun étage par défaut ; VAD locale par énergie ; modèle compatible OpenAI ou Anthropic en flux ; outil lancé conservé après coupure.
 - **Limites :** aucune API réelle appelée (interdit de nuit) ; whisper.cpp réel non joué (modèle local tronqué) ; pas d'essai micro ni en rue.
+
+## 2026-11-12 — N4 page téléphone, code et essai local (nuit, étape B4)
+
+- **Preuves :** `docs/preuves/nuit-2026-11-12/B4.md` ; 369 tests verts (66 nouveaux, réseau limité à la boucle locale) ; essai réel dans Chrome sans interface, micro simulé par un enregistrement, 7/7 contrôles (découpage, coupure pendant la voix, outil, voix jouée, raccroché).
+- **Décisions :** capture et lecture WebRTC du navigateur, transport WebSocket (compatible Access et tunnel), sans nouvelle dépendance ; verrous locaux (hôte, origine, Access ou jeton local) ; aucun fournisseur par défaut.
+- **Limites :** exposition non faite (pas de portée Access, relais WebSocket du Worker à écrire dans le Cockpit) ; aucun essai sur téléphone ni avec un fournisseur réel.

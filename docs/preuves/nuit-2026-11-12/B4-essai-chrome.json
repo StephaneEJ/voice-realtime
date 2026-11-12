@@ -1,0 +1,133 @@
+{
+  "duree_essai_s": 21.7,
+  "scenario_parole_s": [
+    [
+      0.6,
+      2.23
+    ],
+    [
+      5.4,
+      6.59
+    ],
+    [
+      11.43,
+      13.92
+    ]
+  ],
+  "frequence_contexte_navigateur": 48000,
+  "page": {
+    "octets_micro_envoyes": 625920,
+    "echantillons_voix_recus": 140776,
+    "echantillons_voix_joues": 258863,
+    "interruptions": 1,
+    "echantillons_vides_par_la_coupure": 22689,
+    "fin": null,
+    "erreurs": [],
+    "transcriptions_finales": [
+      [
+        "utilisateur",
+        "Bonjour Jarvis."
+      ],
+      [
+        "utilisateur",
+        "Attends."
+      ],
+      [
+        "modele",
+        "D'accord, j'attends."
+      ],
+      [
+        "utilisateur",
+        "Où en est la session pilote ?"
+      ],
+      [
+        "modele",
+        "La session pilote répond : terminée, PILOTE OK."
+      ]
+    ],
+    "outils": [
+      [
+        "sessions_essai",
+        "appel",
+        null
+      ],
+      [
+        "sessions_essai",
+        "resultat",
+        true
+      ]
+    ],
+    "journal_affiche": "Connecté · 1 outil\nBonjour Jarvis.\nBonjour Stéphane. Je suis connecté et je t'écoute.\nAttends.\nD'accord, j'attends.\nOù en est la session pilote ?\nsessions_essai : fait\nLa session pilote répond : terminée, PILOTE OK."
+  },
+  "serveur": {
+    "octets_audio_recus": 625920,
+    "secondes_audio_recues": 19.56,
+    "octets_voix_envoyes": 281552,
+    "motif_fin": "raccroche",
+    "enonces_transcrits": [
+      [
+        84480,
+        16000
+      ],
+      [
+        65280,
+        16000
+      ],
+      [
+        110720,
+        16000
+      ]
+    ],
+    "outils_executes": [
+      "sessions_essai"
+    ],
+    "metriques_tours": [
+      {
+        "source": "audio",
+        "utterance_ms": 2640,
+        "stt_ms": 0.008833128958940506,
+        "first_token_ms": 0.07766718044877052,
+        "first_audio_ms": 2063.0062920972705,
+        "total_ms": 2848.8045828416944,
+        "tool_calls": 0,
+        "interrupted": true,
+        "tokens_in": 0,
+        "tokens_out": 0
+      },
+      {
+        "source": "audio",
+        "utterance_ms": 2040,
+        "stt_ms": 0.00966666266322136,
+        "first_token_ms": 0.08150003850460052,
+        "first_audio_ms": 1083.4812917746603,
+        "total_ms": 1089.6430416032672,
+        "tool_calls": 0,
+        "interrupted": false,
+        "tokens_in": 0,
+        "tokens_out": 0
+      },
+      {
+        "source": "audio",
+        "utterance_ms": 3460,
+        "stt_ms": 0.018999911844730377,
+        "first_token_ms": 3.9574168622493744,
+        "first_audio_ms": 1120.3072499483824,
+        "total_ms": 2319.543333724141,
+        "tool_calls": 1,
+        "interrupted": false,
+        "tokens_in": 0,
+        "tokens_out": 0
+      }
+    ]
+  },
+  "controles": {
+    "micro_du_navigateur_recu": true,
+    "trois_enonces_decoupes": true,
+    "coupure_pendant_la_voix": true,
+    "reponses_apres_coupure": true,
+    "voix_jouee_par_la_page": true,
+    "outil_appele_et_affiche": true,
+    "raccroche": true
+  },
+  "reussi": true
+}
