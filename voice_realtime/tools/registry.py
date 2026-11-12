@@ -235,9 +235,12 @@ def default_registry() -> ToolRegistry:
 
     Sprint 1: search_vault (RO), read_file (RO), note_action (WRITE).
     Sprint 2: vault_write (WRITE), web_search (RO).
+    N1 (12/11/2026): les 5 outils de l'orchestrateur vocal du Cockpit, clients MCP
+    paresseux (aucune connexion tant qu'une persona ne les appelle pas).
     """
     # Imported lazily inside the function so the registry module stays
     # importable even if optional deps for one tool are missing.
+    from .orchestrateur import specs_orchestrateur
     from .vault_write import VAULT_WRITE_SPEC
     from .web_search import WEB_SEARCH_SPEC
 
@@ -285,4 +288,6 @@ def default_registry() -> ToolRegistry:
     ))
     r.register(VAULT_WRITE_SPEC)
     r.register(WEB_SEARCH_SPEC)
+    for spec in specs_orchestrateur():
+        r.register(spec)
     return r

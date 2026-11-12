@@ -78,9 +78,10 @@ def test_registry_as_specs_shape() -> None:
     r = default_registry()
     specs = r.as_specs()
     assert isinstance(specs, list)
-    assert len(specs) == 5
+    assert len(specs) == 10
     names = {s["name"] for s in specs}
-    assert names == {"search_vault", "read_file", "note_action", "vault_write", "web_search"}
+    assert names == {"search_vault", "read_file", "note_action", "vault_write", "web_search",
+                     "list_sessions", "get_state_summary", "get_last_response", "send_instruction", "get_instruction_status"}
     for s in specs:
         assert "description" in s
         assert "parameters" in s
