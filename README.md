@@ -37,7 +37,8 @@ voice-realtime talk \
 voice_realtime/
 ├── providers/           # base.py (Protocol) + openai_realtime.py + gemini.py + chain*.py (mode chaîne)
 ├── audio/               # microphone.py + playback.py (sounddevice PCM16)
-├── cli.py               # status / hello / talk / preview-voices / summarize / stats
+├── cli.py               # status / hello / talk / telephone / preview-voices / summarize / stats
+├── telephone/           # N4 page téléphone : serveur HTTP+WebSocket, pont d'appel, Access, page
 ├── config.py            # ~/.voice-realtime/secrets.env loader + budget
 ├── context_loader.py    # phase active + daily + note projet (prioritized sections)
 ├── cli_context.py       # transcript Claude Code (.jsonl) OU OpenCode (SQLite) actif
@@ -73,6 +74,35 @@ Reconnaissance vocale → modèle API au choix → synthèse vocale, derrière l
 | `--chain-tts` | `say[:voix]` (macOS, local), `openai:<modele>[:voix][@url]` |
 
 Rejouer un enregistrement sans micro : `voice-realtime chain-rejouer tests/fixtures/chain/deux_phrases.wav --chain-stt "script:phrase 1|phrase 2" --chain-llm echo --chain-tts say -o sortie.wav` (aucun réseau).
+
+### Page téléphone (`voice-realtime telephone`, N4)
+
+Une page web pour appeler Jarvis depuis le navigateur du téléphone. Le micro passe par le traitement audio WebRTC du navigateur (annulation d'écho, réduction de bruit, gain automatique). Le son circule en PCM16 sur un WebSocket vers le Mac, qui le relie à n'importe quel fournisseur du protocole `providers`. Code : `voice_realtime/telephone/` (`serveur.py`, `pont.py`, `acces.py`, `static/`).
+
+```bash
+# Essai local sans réseau ni clé (navigateur du Mac sur http://localhost:7720/)
+voice-realtime telephone --provider chain --chain-stt "script:Bonjour.|Liste mes sessions." \
+  --chain-llm echo --chain-tts say:Thomas --outils ""
+# Essai automatisé : vrai Chrome sans interface, micro simulé par un enregistrement
+uv run --frozen python scripts/essai_telephone_chrome.py --sortie /tmp/essai-telephone
+```
+
+- **Fournisseur :** `--provider` est obligatoire (`chain`, `gemini` ou `openai`). Il n'y a pas de fournisseur par défaut avant le banc N3. Chaque appel ouvre un fournisseur neuf, et un seul appel est servi à la fois.
+- **Outils :** par défaut, les 5 outils de l'orchestrateur (`--outils` pour changer, vide pour aucun). Le garde-fou, la liste blanche et la confirmation en deux temps restent côté serveur MCP. La page ne reçoit que le nom des outils et leur succès.
+- **Fin d'appel :** bouton « Raccrocher », mot d'arrêt (« termine la session », « fin Jarvis », « stop session », « killchat »), `--max-minutes` ou `--cost-cap`.
+- **Sécurité locale :**
+  - écoute sur `127.0.0.1` ;
+  - liste fermée d'hôtes (protection contre le rattachement DNS) ;
+  - `Origin` du WebSocket contrôlé ;
+  - CSP stricte, sans ressource externe.
+- **Exposition :** elle exige un verrou local en plus d'Access, selon le chemin choisi :
+  - jeton Access vérifié (`--access-equipe`, `--access-aud`, `--access-adresse`) quand le tunnel transmet `Cf-Access-Jwt-Assertion` ;
+  - jeton local `Authorization: Bearer` (`--jeton-fichier`, fichier 600) quand un relais le pose, comme le Worker pour l'écran O5.
+
+  `--prefixe /voix` sert la page sous un chemin public, et `--nom-public` déclare le nom d'hôte du navigateur. La page n'emploie que des adresses relatives.
+- **Limites connues :**
+  - le micro exige HTTPS (ou `localhost`) ;
+  - sur iPhone, Safari coupe le micro quand l'écran se verrouille : la page demande à garder l'écran allumé (Wake Lock).
 
 ## Flags `talk`
 

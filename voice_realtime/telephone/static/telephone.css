@@ -1,0 +1,158 @@
+:root {
+  color-scheme: light dark;
+  --fond: #f4f5f2;
+  --surface: #ffffff;
+  --texte: #15191d;
+  --discret: #5d6670;
+  --trait: #d9ddd6;
+  --accent: #1f7a5c;
+  --accent-texte: #ffffff;
+  --raccrocher: #b3352b;
+  --ecoute: #1f7a5c;
+  --parle: #2f5fb3;
+  --outil: #a86b12;
+  --moi: #e7efe9;
+  --lui: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fond: #101418;
+    --surface: #182027;
+    --texte: #e8ecef;
+    --discret: #93a0ab;
+    --trait: #2a343d;
+    --accent: #3fae86;
+    --accent-texte: #0c1512;
+    --raccrocher: #e0594e;
+    --ecoute: #3fae86;
+    --parle: #6f9ae8;
+    --outil: #e0a548;
+    --moi: #1d2b26;
+    --lui: #182027;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--fond);
+  color: var(--texte);
+  font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+.appli {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 520px;
+  min-height: 100%;
+  margin: 0 auto;
+  padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+}
+
+.tete { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.tete h1 { margin: 0; font-size: 1.25rem; font-weight: 650; letter-spacing: 0.01em; }
+.discret { margin: 0; color: var(--discret); font-size: 0.85rem; overflow-wrap: anywhere; text-align: right; }
+
+.centre { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 12px 0 4px; }
+
+.anneau {
+  display: grid;
+  place-items: center;
+  width: 196px;
+  height: 196px;
+  border-radius: 50%;
+  border: 3px solid var(--trait);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+.anneau[data-etat="ecoute"] { border-color: var(--ecoute); }
+.anneau[data-etat="parle"] { border-color: var(--parle); box-shadow: 0 0 0 6px color-mix(in srgb, var(--parle) 22%, transparent); }
+.anneau[data-etat="outil"] { border-color: var(--outil); }
+.anneau[data-etat="connexion"] { border-style: dashed; }
+
+.appel {
+  width: 168px;
+  height: 168px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-texte);
+  font-size: 1.3rem;
+  font-weight: 650;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.appel.en-cours { background: var(--raccrocher); color: #fff; }
+.appel:active { transform: scale(0.97); }
+.appel:focus-visible, .secondaire:focus-visible, input:focus-visible { outline: 3px solid var(--parle); outline-offset: 3px; }
+
+.etat { margin: 0; min-height: 1.45em; font-weight: 600; text-align: center; }
+
+.niveaux {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 6px 10px;
+  width: 100%;
+  max-width: 320px;
+}
+.niveau-libelle { color: var(--discret); font-size: 0.8rem; }
+.barre { height: 6px; border-radius: 3px; background: var(--trait); overflow: hidden; }
+.barre > span { display: block; height: 100%; width: 0%; background: var(--ecoute); transition: width 80ms linear; }
+#niveau-voix { background: var(--parle); }
+
+.commandes { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+
+.secondaire {
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid var(--trait);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--texte);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.secondaire[aria-pressed="true"] { background: var(--outil); border-color: var(--outil); color: #111; }
+.secondaire:disabled, input:disabled { opacity: 0.45; cursor: default; }
+
+.journal { flex: 1; min-height: 120px; overflow-y: auto; }
+.journal ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.journal li {
+  max-width: 88%;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--trait);
+  background: var(--lui);
+  overflow-wrap: anywhere;
+}
+.journal li.utilisateur { align-self: flex-end; background: var(--moi); }
+.journal li.systeme { align-self: center; max-width: 100%; border: 0; background: none; color: var(--discret); font-size: 0.85rem; padding: 0; }
+.journal li.partiel { opacity: 0.7; }
+
+.saisie { display: flex; gap: 8px; }
+.saisie input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--trait);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--texte);
+  font: inherit;
+}
+
+.avertissement {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--raccrocher) 14%, var(--surface));
+  border: 1px solid var(--raccrocher);
+}

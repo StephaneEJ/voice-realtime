@@ -1,0 +1,11 @@
+{
+  "name": "Jarvis voix",
+  "short_name": "Jarvis",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#101418",
+  "theme_color": "#101418",
+  "lang": "fr",
+  "icons": [{ "src": "icone.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
