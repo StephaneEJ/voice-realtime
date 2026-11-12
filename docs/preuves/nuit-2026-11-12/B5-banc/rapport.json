@@ -1,0 +1,1014 @@
+{
+  "banc": "N3",
+  "a_blanc": true,
+  "debut": "2026-11-12T02:41:30+01:00",
+  "budget_usd": null,
+  "majorant_payant_usd": null,
+  "connexions_bloquees": [],
+  "scenarios": [
+    {
+      "id": "outils-et-coupure",
+      "enregistrement": "deux_phrases.wav",
+      "langue": "fr",
+      "outils_attendus": [
+        "list_sessions",
+        "get_last_response"
+      ],
+      "coupure_ms": 3430,
+      "mot_arret": false,
+      "duree_ms": 6917,
+      "description": "Deux demandes en français : lister les sessions puis lire le dernier retour ; la seconde phrase commence pendant la réponse à la première (coupure attendue)."
+    },
+    {
+      "id": "phrase-courte",
+      "enregistrement": "coupure.wav",
+      "langue": "fr",
+      "outils_attendus": [],
+      "coupure_ms": null,
+      "mot_arret": false,
+      "duree_ms": 2492,
+      "description": "Énoncé bref « Attends, arrête-toi. » : latence sur une phrase courte, aucune action attendue."
+    },
+    {
+      "id": "mot-arret",
+      "enregistrement": "killchat.wav",
+      "langue": "fr",
+      "outils_attendus": [],
+      "coupure_ms": null,
+      "mot_arret": true,
+      "duree_ms": 1772,
+      "description": "Mot d'arrêt « Killchat » : doit être reconnu par la règle de la CLI."
+    },
+    {
+      "id": "voix-humaine-en",
+      "enregistrement": "jfk.wav",
+      "langue": "en",
+      "outils_attendus": [],
+      "coupure_ms": null,
+      "mot_arret": false,
+      "duree_ms": 11000,
+      "description": "Voix humaine réelle (domaine public), en anglais : robustesse de la détection de parole ; le taux d'erreur n'y mesure pas le français."
+    }
+  ],
+  "candidats": [
+    {
+      "candidat": {
+        "id": "simule-rapide",
+        "genre": "chaine",
+        "stt": "simule:rapide",
+        "llm": "simule:rapide",
+        "tts": "simule:rapide",
+        "fournisseur": "",
+        "modele": "",
+        "description": "Étages simulés rapides (prix fictifs).",
+        "requiert": []
+      },
+      "joue": true,
+      "gratuit": true,
+      "motif": null,
+      "duree_reelle_s": 4.383,
+      "synthese": {
+        "scenarios_joues": 4,
+        "scenarios_en_echec": 0,
+        "premiere_reponse_p50_ms": 1393.1347079034635,
+        "premiere_reponse_p90_ms": 1505.1714377753294,
+        "attente_vad_moyenne_ms": 697.2499999999881,
+        "stt_moyen_ms": 151.82972040825658,
+        "premier_jeton_moyen_ms": 504.1996500454843,
+        "taux_erreur_mots_moyen": 0.0,
+        "part_reponses_fr": 1.0,
+        "coupures_detectees": 1.0,
+        "delai_coupure_moyen_ms": 210.00000000000273,
+        "outils_corrects": 1.0,
+        "mot_arret_reconnu": 1.0,
+        "erreurs": 0
+      },
+      "chiffrage": {
+        "cout_usd": 0.007755,
+        "cout_horaire_usd": 1.2585667675350363,
+        "fictif": true,
+        "inconnus": [],
+        "detail": {
+          "stt": 0.00201,
+          "llm": 0.000315,
+          "tts": 0.00543
+        }
+      },
+      "estimation_avant_passage": null,
+      "scenarios": [
+        {
+          "scenario_id": "outils-et-coupure",
+          "joue": true,
+          "motif": null,
+          "transcription": "Liste mes sessions en cours. Quel est le dernier retour de la session cockpit ?",
+          "taux_erreur_mots": 0.0,
+          "langues_reponses": [
+            "fr",
+            "fr"
+          ],
+          "premieres_reponses_ms": [
+            1507.3702503554546,
+            1500.0408750883707
+          ],
+          "attentes_vad_ms": [
+            690.0000000000023,
+            682.9999999999472
+          ],
+          "stt_ms": [
+            152.13724970817566,
+            151.45145915448666
+          ],
+          "premier_jeton_ms": [
+            655.2835837937891,
+            654.3070422485471
+          ],
+          "coupure_attendue": true,
+          "coupure_detectee": true,
+          "delai_coupure_ms": 210.00000000000273,
+          "outils_attendus": [
+            "list_sessions",
+            "get_last_response"
+          ],
+          "outils_appeles": [
+            "list_sessions",
+            "get_last_response"
+          ],
+          "outils_corrects": true,
+          "mot_arret_attendu": false,
+          "mot_arret_reconnu": null,
+          "erreurs": [],
+          "usage": {
+            "duree_s": 6.9175,
+            "audio_entree_s": 6.08,
+            "audio_sortie_s": 12.35,
+            "jetons_entree": 552,
+            "jetons_sortie": 52,
+            "caracteres_synthese": 190
+          },
+          "part_francais": 1.0
+        },
+        {
+          "scenario_id": "phrase-courte",
+          "joue": true,
+          "motif": null,
+          "transcription": "Attends, arrête-toi.",
+          "taux_erreur_mots": 0.0,
+          "langues_reponses": [
+            "fr"
+          ],
+          "premieres_reponses_ms": [
+            1275.6176673732716
+          ],
+          "attentes_vad_ms": [
+            708.0000000000018
+          ],
+          "stt_ms": [
+            152.10908325389028
+          ],
+          "premier_jeton_ms": [
+            404.29320791736245
+          ],
+          "coupure_attendue": false,
+          "coupure_detectee": null,
+          "delai_coupure_ms": null,
+          "outils_attendus": [],
+          "outils_appeles": [],
+          "outils_corrects": null,
+          "mot_arret_attendu": false,
+          "mot_arret_reconnu": null,
+          "erreurs": [],
+          "usage": {
+            "duree_s": 2.4920625,
+            "audio_entree_s": 2.04,
+            "audio_sortie_s": 4.485,
+            "jetons_entree": 68,
+            "jetons_sortie": 18,
+            "caracteres_synthese": 69
+          },
+          "part_francais": 1.0
+        },
+        {
+          "scenario_id": "mot-arret",
+          "joue": true,
+          "motif": null,
+          "transcription": "Killchat.",
+          "taux_erreur_mots": 0.0,
+          "langues_reponses": [
+            "fr"
+          ],
+          "premieres_reponses_ms": [
+            1286.2285407185564
+          ],
+          "attentes_vad_ms": [
+            708.0000000000009
+          ],
+          "stt_ms": [
+            150.72112530469894
+          ],
+          "premier_jeton_ms": [
+            402.9312082566321
+          ],
+          "coupure_attendue": false,
+          "coupure_detectee": null,
+          "delai_coupure_ms": null,
+          "outils_attendus": [],
+          "outils_appeles": [],
+          "outils_corrects": null,
+          "mot_arret_attendu": true,
+          "mot_arret_reconnu": true,
+          "erreurs": [],
+          "usage": {
+            "duree_s": 1.7728125,
+            "audio_entree_s": 1.48,
+            "audio_sortie_s": 2.21,
+            "jetons_entree": 65,
+            "jetons_sortie": 9,
+            "caracteres_synthese": 34
+          },
+          "part_francais": 1.0
+        },
+        {
+          "scenario_id": "voix-humaine-en",
+          "joue": true,
+          "motif": null,
+          "transcription": "And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country.",
+          "taux_erreur_mots": 0.0,
+          "langues_reponses": [
+            "fr"
+          ],
+          "premieres_reponses_ms": [],
+          "attentes_vad_ms": [],
+          "stt_ms": [
+            152.19387505203485,
+            152.11516711860895,
+            152.0800832659006
+          ],
+          "premier_jeton_ms": [
+            404.18320801109076
+          ],
+          "coupure_attendue": false,
+          "coupure_detectee": null,
+          "delai_coupure_ms": null,
+          "outils_attendus": [],
+          "outils_appeles": [],
+          "outils_corrects": null,
+          "mot_arret_attendu": false,
+          "mot_arret_reconnu": null,
+          "erreurs": [],
+          "usage": {
+            "duree_s": 11.0,
+            "audio_entree_s": 10.5,
+            "audio_sortie_s": 4.485,
+            "jetons_entree": 90,
+            "jetons_sortie": 18,
+            "caracteres_synthese": 69
+          },
+          "part_francais": 1.0
+        }
+      ]
+    },
+    {
+      "candidat": {
+        "id": "simule-lent",
+        "genre": "chaine",
+        "stt": "simule:lent",
+        "llm": "simule:lent",
+        "tts": "simule:lent",
+        "fournisseur": "",
+        "modele": "",
+        "description": "Étages simulés lents (prix fictifs).",
+        "requiert": []
+      },
+      "joue": true,
+      "gratuit": true,
+      "motif": null,
+      "duree_reelle_s": 15.79,
+      "synthese": {
+        "scenarios_joues": 4,
+        "scenarios_en_echec": 0,
+        "premiere_reponse_p50_ms": 3248.9786246716717,
+        "premiere_reponse_p90_ms": 3672.410096348808,
+        "attente_vad_moyenne_ms": 697.2499999999881,
+        "stt_moyen_ms": 602.0234880436744,
+        "premier_jeton_moyen_ms": 1864.909491315484,
+        "taux_erreur_mots_moyen": 0.0,
+        "part_reponses_fr": 1.0,
+        "coupures_detectees": 1.0,
+        "delai_coupure_moyen_ms": 210.00000000000273,
+        "outils_corrects": 1.0,
+        "mot_arret_reconnu": 1.0,
+        "erreurs": 0
+      },
+      "chiffrage": {
+        "cout_usd": 0.007755,
+        "cout_horaire_usd": 1.2585667675350363,
+        "fictif": true,
+        "inconnus": [],
+        "detail": {
+          "stt": 0.00201,
+          "llm": 0.000315,
+          "tts": 0.00543
+        }
+      },
+      "estimation_avant_passage": null,
+      "scenarios": [
+        {
+          "scenario_id": "outils-et-coupure",
+          "joue": true,
+          "motif": null,
+          "transcription": "Liste mes sessions en cours. Quel est le dernier retour de la session cockpit ?",
+          "taux_erreur_mots": 0.0,
+          "langues_reponses": [
+            "fr",
+            "fr"
+          ],
+          "premieres_reponses_ms": [
+            3674.822084195914,
+            3666.78212470556
+          ],
+          "attentes_vad_ms": [
+            690.0000000000023,
+            682.9999999999472
+          ],
+          "stt_ms": [
+            602.1267496980727,
+            602.2066250443459
+          ],
+          "premier_jeton_ms": [
+            2406.362374778837,
+            2405.123082920909
+          ],
+          "coupure_attendue": true,
+          "coupure_detectee": true,
+          "delai_coupure_ms": 210.00000000000273,
+          "outils_attendus": [
+            "list_sessions",
+            "get_last_response"
+          ],
+          "outils_appeles": [
+            "list_sessions",
+            "get_last_response"
+          ],
+          "outils_corrects": true,
+          "mot_arret_attendu": false,
+          "mot_arret_reconnu": null,
+          "erreurs": [],
+          "usage": {
+            "duree_s": 6.9175,
+            "audio_entree_s": 6.08,
+            "audio_sortie_s": 12.35,
+            "jetons_entree": 552,
+            "jetons_sortie": 52,
+            "caracteres_synthese": 190
+          },
+          "part_francais": 1.0
+        },
+        {
+          "scenario_id": "phrase-courte",
+          "joue": true,
+          "motif": null,
+          "transcription": "Attends, arrête-toi.",
+          "taux_erreur_mots": 0.0,
+          "langues_reponses": [
+            "fr"
+          ],
+          "premieres_reponses_ms": [
+            2791.052041940393
+          ],
+          "attentes_vad_ms": [
+            708.0000000000018
+          ],
+          "stt_ms": [
+            602.0892909727991
+          ],
+          "premier_jeton_ms": [
+            1504.2616659775376
+          ],
+          "coupure_attendue": false,
+          "coupure_detectee": null,
+          "delai_coupure_ms": null,
+          "outils_attendus": [],
+          "outils_appeles": [],
+          "outils_corrects": null,
+          "mot_arret_attendu": false,
+          "mot_arret_reconnu": null,
+          "erreurs": [],
+          "usage": {
+            "duree_s": 2.4920625,
+            "audio_entree_s": 2.04,
+            "audio_sortie_s": 4.485,
+            "jetons_entree": 68,
+            "jetons_sortie": 18,
+            "caracteres_synthese": 69
+          },
+          "part_francais": 1.0
+        },
+        {
+          "scenario_id": "mot-arret",
+          "joue": true,
+          "motif": null,
+          "transcription": "Killchat.",
+          "taux_erreur_mots": 0.0,
+          "langues_reponses": [
+            "fr"
+          ],
+          "premieres_reponses_ms": [
+            2831.1751246377835
+          ],
+          "attentes_vad_ms": [
+            708.0000000000009
+          ],
+          "stt_ms": [
+            602.1575420163572
+          ],
+          "premier_jeton_ms": [
+            1504.4123330153525
+          ],
+          "coupure_attendue": false,
+          "coupure_detectee": null,
+          "delai_coupure_ms": null,
+          "outils_attendus": [],
+          "outils_appeles": [],
+          "outils_corrects": null,
+          "mot_arret_attendu": true,
+          "mot_arret_reconnu": true,
+          "erreurs": [],
+          "usage": {
+            "duree_s": 1.7728125,
+            "audio_entree_s": 1.48,
+            "audio_sortie_s": 2.21,
+            "jetons_entree": 65,
+            "jetons_sortie": 9,
+            "caracteres_synthese": 34
+          },
+          "part_francais": 1.0
+        },
+        {
+          "scenario_id": "voix-humaine-en",
+          "joue": true,
+          "motif": null,
+          "transcription": "And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country.",
+          "taux_erreur_mots": 0.0,
+          "langues_reponses": [
+            "fr"
+          ],
+          "premieres_reponses_ms": [],
+          "attentes_vad_ms": [],
+          "stt_ms": [
+            602.1318747662008,
+            601.349291857332,
+            602.1030419506133
+          ],
+          "premier_jeton_ms": [
+            1504.3879998847842
+          ],
+          "coupure_attendue": false,
+          "coupure_detectee": null,
+          "delai_coupure_ms": null,
+          "outils_attendus": [],
+          "outils_appeles": [],
+          "outils_corrects": null,
+          "mot_arret_attendu": false,
+          "mot_arret_reconnu": null,
+          "erreurs": [],
+          "usage": {
+            "duree_s": 11.0,
+            "audio_entree_s": 10.5,
+            "audio_sortie_s": 4.485,
+            "jetons_entree": 90,
+            "jetons_sortie": 18,
+            "caracteres_synthese": 69
+          },
+          "part_francais": 1.0
+        }
+      ]
+    },
+    {
+      "candidat": {
+        "id": "simule-degrade",
+        "genre": "chaine",
+        "stt": "simule:degrade",
+        "llm": "simule:degrade",
+        "tts": "simule:degrade",
+        "fournisseur": "",
+        "modele": "",
+        "description": "Transcription abîmée et réponses en anglais injectées : vérifie que les métriques les voient.",
+        "requiert": []
+      },
+      "joue": true,
+      "gratuit": true,
+      "motif": null,
+      "duree_reelle_s": 7.747,
+      "synthese": {
+        "scenarios_joues": 4,
+        "scenarios_en_echec": 0,
+        "premiere_reponse_p50_ms": 1939.0503755695863,
+        "premiere_reponse_p90_ms": 2214.756058351698,
+        "attente_vad_moyenne_ms": 697.2499999999881,
+        "stt_moyen_ms": 301.95580975019504,
+        "premier_jeton_moyen_ms": 904.5088334009051,
+        "taux_erreur_mots_moyen": 0.11038961038961038,
+        "part_reponses_fr": 0.4,
+        "coupures_detectees": 1.0,
+        "delai_coupure_moyen_ms": 210.00000000000273,
+        "outils_corrects": 0.0,
+        "mot_arret_reconnu": 1.0,
+        "erreurs": 0
+      },
+      "chiffrage": {
+        "cout_usd": 0.005742000000000001,
+        "cout_horaire_usd": 0.9318749683025376,
+        "fictif": true,
+        "inconnus": [],
+        "detail": {
+          "stt": 0.00201,
+          "llm": 0.000222,
+          "tts": 0.00351
+        }
+      },
+      "estimation_avant_passage": null,
+      "scenarios": [
+        {
+          "scenario_id": "outils-et-coupure",
+          "joue": true,
+          "motif": null,
+          "transcription": "Liste mes sessions cours. Quel est le retour de la cockpit ?",
+          "taux_erreur_mots": 0.21428571428571427,
+          "langues_reponses": [
+            "fr",
+            "en"
+          ],
+          "premieres_reponses_ms": [
+            2327.5503330491506,
+            1926.5313337481984
+          ],
+          "attentes_vad_ms": [
+            690.0000000000023,
+            682.9999999999472
+          ],
+          "stt_ms": [
+            300.77349999919534,
+            302.1580842323601
+          ],
+          "premier_jeton_ms": [
+            1305.6235830299556,
+            803.7614999338984
+          ],
+          "coupure_attendue": true,
+          "coupure_detectee": true,
+          "delai_coupure_ms": 210.00000000000273,
+          "outils_attendus": [
+            "list_sessions",
+            "get_last_response"
+          ],
+          "outils_appeles": [
+            "list_sessions"
+          ],
+          "outils_corrects": false,
+          "mot_arret_attendu": false,
+          "mot_arret_reconnu": null,
+          "erreurs": [],
+          "usage": {
+            "duree_s": 6.9175,
+            "audio_entree_s": 6.08,
+            "audio_sortie_s": 8.45,
+            "jetons_entree": 361,
+            "jetons_sortie": 35,
+            "caracteres_synthese": 130
+          },
+          "part_francais": 0.5
+        },
+        {
+          "scenario_id": "phrase-courte",
+          "joue": true,
+          "motif": null,
+          "transcription": "Attends, arrête-toi.",
+          "taux_erreur_mots": 0.0,
+          "langues_reponses": [
+            "en"
+          ],
+          "premieres_reponses_ms": [
+            1951.5694173909742
+          ],
+          "attentes_vad_ms": [
+            708.0000000000018
+          ],
+          "stt_ms": [
+            302.2245420143008
+          ],
+          "premier_jeton_ms": [
+            804.5407920144498
+          ],
+          "coupure_attendue": false,
+          "coupure_detectee": null,
+          "delai_coupure_ms": null,
+          "outils_attendus": [],
+          "outils_appeles": [],
+          "outils_corrects": null,
+          "mot_arret_attendu": false,
+          "mot_arret_reconnu": null,
+          "erreurs": [],
+          "usage": {
+            "duree_s": 2.4920625,
+            "audio_entree_s": 2.04,
+            "audio_sortie_s": 2.275,
+            "jetons_entree": 68,
+            "jetons_sortie": 9,
+            "caracteres_synthese": 35
+          },
+          "part_francais": 0.0
+        },
+        {
+          "scenario_id": "mot-arret",
+          "joue": true,
+          "motif": null,
+          "transcription": "Killchat.",
+          "taux_erreur_mots": 0.0,
+          "langues_reponses": [
+            "fr"
+          ],
+          "premieres_reponses_ms": [
+            1872.5285002887258
+          ],
+          "attentes_vad_ms": [
+            708.0000000000009
+          ],
+          "stt_ms": [
+            302.0901666022837
+          ],
+          "premier_jeton_ms": [
+            804.370999801904
+          ],
+          "coupure_attendue": false,
+          "coupure_detectee": null,
+          "delai_coupure_ms": null,
+          "outils_attendus": [],
+          "outils_appeles": [],
+          "outils_corrects": null,
+          "mot_arret_attendu": true,
+          "mot_arret_reconnu": true,
+          "erreurs": [],
+          "usage": {
+            "duree_s": 1.7728125,
+            "audio_entree_s": 1.48,
+            "audio_sortie_s": 2.21,
+            "jetons_entree": 65,
+            "jetons_sortie": 9,
+            "caracteres_synthese": 34
+          },
+          "part_francais": 1.0
+        },
+        {
+          "scenario_id": "voix-humaine-en",
+          "joue": true,
+          "motif": null,
+          "transcription": "And so my Americans, ask not your country can for you, ask you can do your country.",
+          "taux_erreur_mots": 0.22727272727272727,
+          "langues_reponses": [
+            "en"
+          ],
+          "premieres_reponses_ms": [],
+          "attentes_vad_ms": [],
+          "stt_ms": [
+            302.21058428287506,
+            302.15229094028473,
+            302.08150018006563
+          ],
+          "premier_jeton_ms": [
+            804.2472922243178
+          ],
+          "coupure_attendue": false,
+          "coupure_detectee": null,
+          "delai_coupure_ms": null,
+          "outils_attendus": [],
+          "outils_appeles": [],
+          "outils_corrects": null,
+          "mot_arret_attendu": false,
+          "mot_arret_reconnu": null,
+          "erreurs": [],
+          "usage": {
+            "duree_s": 11.0,
+            "audio_entree_s": 10.5,
+            "audio_sortie_s": 2.275,
+            "jetons_entree": 84,
+            "jetons_sortie": 9,
+            "caracteres_synthese": 35
+          },
+          "part_francais": 0.0
+        }
+      ]
+    },
+    {
+      "candidat": {
+        "id": "local-say",
+        "genre": "chaine",
+        "stt": "simule:rapide",
+        "llm": "simule:rapide",
+        "tts": "say:Thomas",
+        "fournisseur": "",
+        "modele": "",
+        "description": "Synthèse réelle locale et gratuite (macOS say), reconnaissance et modèle simulés.",
+        "requiert": [
+          "say"
+        ]
+      },
+      "joue": true,
+      "gratuit": true,
+      "motif": null,
+      "duree_reelle_s": 14.464,
+      "synthese": {
+        "scenarios_joues": 4,
+        "scenarios_en_echec": 0,
+        "premiere_reponse_p50_ms": 2370.2919584158553,
+        "premiere_reponse_p90_ms": 2613.145487410561,
+        "attente_vad_moyenne_ms": 697.2499999999881,
+        "stt_moyen_ms": 152.11348215650236,
+        "premier_jeton_moyen_ms": 505.2822415716946,
+        "taux_erreur_mots_moyen": 0.0,
+        "part_reponses_fr": 1.0,
+        "coupures_detectees": 1.0,
+        "delai_coupure_moyen_ms": 210.00000000000273,
+        "outils_corrects": 1.0,
+        "mot_arret_reconnu": 1.0,
+        "erreurs": 0
+      },
+      "chiffrage": {
+        "cout_usd": 0.0023250000000000002,
+        "cout_horaire_usd": 0.37732659374841515,
+        "fictif": true,
+        "inconnus": [],
+        "detail": {
+          "stt": 0.00201,
+          "llm": 0.000315,
+          "tts": 0.0
+        }
+      },
+      "estimation_avant_passage": null,
+      "scenarios": [
+        {
+          "scenario_id": "outils-et-coupure",
+          "joue": true,
+          "motif": null,
+          "transcription": "Liste mes sessions en cours. Quel est le dernier retour de la session cockpit ?",
+          "taux_erreur_mots": 0.0,
+          "langues_reponses": [
+            "fr",
+            "fr"
+          ],
+          "premieres_reponses_ms": [
+            2705.664124861362,
+            2397.2686666920254
+          ],
+          "attentes_vad_ms": [
+            690.0000000000023,
+            682.9999999999472
+          ],
+          "stt_ms": [
+            152.15220907703042,
+            152.11466699838638
+          ],
+          "premier_jeton_ms": [
+            656.6958748735487,
+            657.0370830595493
+          ],
+          "coupure_attendue": true,
+          "coupure_detectee": true,
+          "delai_coupure_ms": 210.00000000000273,
+          "outils_attendus": [
+            "list_sessions",
+            "get_last_response"
+          ],
+          "outils_appeles": [
+            "list_sessions",
+            "get_last_response"
+          ],
+          "outils_corrects": true,
+          "mot_arret_attendu": false,
+          "mot_arret_reconnu": null,
+          "erreurs": [],
+          "usage": {
+            "duree_s": 6.9175,
+            "audio_entree_s": 6.08,
+            "audio_sortie_s": 12.01725,
+            "jetons_entree": 552,
+            "jetons_sortie": 52,
+            "caracteres_synthese": 190
+          },
+          "part_francais": 1.0
+        },
+        {
+          "scenario_id": "phrase-courte",
+          "joue": true,
+          "motif": null,
+          "transcription": "Attends, arrête-toi.",
+          "taux_erreur_mots": 0.0,
+          "langues_reponses": [
+            "fr"
+          ],
+          "premieres_reponses_ms": [
+            2343.3152501396853
+          ],
+          "attentes_vad_ms": [
+            708.0000000000018
+          ],
+          "stt_ms": [
+            152.10650023072958
+          ],
+          "premier_jeton_ms": [
+            404.3701668269932
+          ],
+          "coupure_attendue": false,
+          "coupure_detectee": null,
+          "delai_coupure_ms": null,
+          "outils_attendus": [],
+          "outils_appeles": [],
+          "outils_corrects": null,
+          "mot_arret_attendu": false,
+          "mot_arret_reconnu": null,
+          "erreurs": [],
+          "usage": {
+            "duree_s": 2.4920625,
+            "audio_entree_s": 2.04,
+            "audio_sortie_s": 4.202125,
+            "jetons_entree": 68,
+            "jetons_sortie": 18,
+            "caracteres_synthese": 69
+          },
+          "part_francais": 1.0
+        },
+        {
+          "scenario_id": "mot-arret",
+          "joue": true,
+          "motif": null,
+          "transcription": "Killchat.",
+          "taux_erreur_mots": 0.0,
+          "langues_reponses": [
+            "fr"
+          ],
+          "premieres_reponses_ms": [
+            2210.9796245507905
+          ],
+          "attentes_vad_ms": [
+            708.0000000000009
+          ],
+          "stt_ms": [
+            152.0909578539431
+          ],
+          "premier_jeton_ms": [
+            404.4020832516253
+          ],
+          "coupure_attendue": false,
+          "coupure_detectee": null,
+          "delai_coupure_ms": null,
+          "outils_attendus": [],
+          "outils_appeles": [],
+          "outils_corrects": null,
+          "mot_arret_attendu": true,
+          "mot_arret_reconnu": true,
+          "erreurs": [],
+          "usage": {
+            "duree_s": 1.7728125,
+            "audio_entree_s": 1.48,
+            "audio_sortie_s": 2.362791666666667,
+            "jetons_entree": 65,
+            "jetons_sortie": 9,
+            "caracteres_synthese": 34
+          },
+          "part_francais": 1.0
+        },
+        {
+          "scenario_id": "voix-humaine-en",
+          "joue": true,
+          "motif": null,
+          "transcription": "And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country.",
+          "taux_erreur_mots": 0.0,
+          "langues_reponses": [
+            "fr"
+          ],
+          "premieres_reponses_ms": [],
+          "attentes_vad_ms": [],
+          "stt_ms": [
+            152.1045407280326,
+            152.1267080679536,
+            152.09879213944077
+          ],
+          "premier_jeton_ms": [
+            403.90599984675646
+          ],
+          "coupure_attendue": false,
+          "coupure_detectee": null,
+          "delai_coupure_ms": null,
+          "outils_attendus": [],
+          "outils_appeles": [],
+          "outils_corrects": null,
+          "mot_arret_attendu": false,
+          "mot_arret_reconnu": null,
+          "erreurs": [],
+          "usage": {
+            "duree_s": 11.0,
+            "audio_entree_s": 10.5,
+            "audio_sortie_s": 4.202125,
+            "jetons_entree": 90,
+            "jetons_sortie": 18,
+            "caracteres_synthese": 69
+          },
+          "part_francais": 1.0
+        }
+      ]
+    },
+    {
+      "candidat": {
+        "id": "gemini-live",
+        "genre": "temps_reel",
+        "stt": "",
+        "llm": "",
+        "tts": "",
+        "fournisseur": "gemini",
+        "modele": "gemini-2.5-flash-native-audio-latest",
+        "description": "Gemini Live, audio natif (payant).",
+        "requiert": []
+      },
+      "joue": false,
+      "gratuit": false,
+      "motif": "payant : non joué à blanc",
+      "duree_reelle_s": 0.0,
+      "synthese": null,
+      "chiffrage": null,
+      "estimation_avant_passage": {
+        "cout_usd": 0.008625944444444445,
+        "cout_horaire_usd": 1.4,
+        "fictif": false,
+        "inconnus": [],
+        "detail": {
+          "temps_reel": 0.008625944444444445
+        }
+      },
+      "scenarios": []
+    },
+    {
+      "candidat": {
+        "id": "openai-realtime-mini",
+        "genre": "temps_reel",
+        "stt": "",
+        "llm": "",
+        "tts": "",
+        "fournisseur": "openai",
+        "modele": "gpt-realtime-mini",
+        "description": "OpenAI Realtime mini (payant).",
+        "requiert": []
+      },
+      "joue": false,
+      "gratuit": false,
+      "motif": "payant : non joué à blanc",
+      "duree_reelle_s": 0.0,
+      "synthese": null,
+      "chiffrage": null,
+      "estimation_avant_passage": {
+        "cout_usd": 0.0077017361111111115,
+        "cout_horaire_usd": 1.25,
+        "fictif": false,
+        "inconnus": [],
+        "detail": {
+          "temps_reel": 0.0077017361111111115
+        }
+      },
+      "scenarios": []
+    },
+    {
+      "candidat": {
+        "id": "chaine-api",
+        "genre": "chaine",
+        "stt": "openai:gpt-4o-mini-transcribe",
+        "llm": "anthropic:claude-haiku-5-5",
+        "tts": "openai:gpt-4o-mini-tts:alloy",
+        "fournisseur": "",
+        "modele": "",
+        "description": "Chaîne sur API (payant) : modèles à confirmer par Stéphane avant le passage réel.",
+        "requiert": []
+      },
+      "joue": false,
+      "gratuit": false,
+      "motif": "payant : non joué à blanc",
+      "duree_reelle_s": 0.0,
+      "synthese": null,
+      "chiffrage": null,
+      "estimation_avant_passage": {
+        "cout_usd": null,
+        "cout_horaire_usd": null,
+        "fictif": false,
+        "inconnus": [
+          "stt openai:gpt-4o-mini-transcribe (usd_par_minute)",
+          "llm anthropic:claude-haiku-5-5 (usd_par_million_entree)",
+          "llm anthropic:claude-haiku-5-5 (usd_par_million_sortie)",
+          "tts openai:gpt-4o-mini-tts:alloy (usd_par_million_caracteres)"
+        ],
+        "detail": {
+          "stt": null,
+          "llm": null,
+          "tts": null
+        }
+      },
+      "scenarios": []
+    }
+  ]
+}

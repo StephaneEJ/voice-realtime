@@ -104,6 +104,22 @@ uv run --frozen python scripts/essai_telephone_chrome.py --sortie /tmp/essai-tel
   - le micro exige HTTPS (ou `localhost`) ;
   - sur iPhone, Safari coupe le micro quand l'écran se verrouille : la page demande à garder l'écran allumé (Wake Lock).
 
+### Banc d'essai (`voice-realtime banc`, N3)
+
+Compare les candidats (mode chaîne ou fournisseur temps réel) sur des scénarios enregistrés et écrit `rapport.md` et `rapport.json`. Mesures : latence de première réponse (p50, p90, avec le détail fin de parole, transcription, premier jeton), taux d'erreur de mots et langue des réponses, coupure de parole et son délai, appels d'outils attendus (orchestrateur factice, jamais une session réelle), mot d'arrêt, coût à l'heure. Code : `voice_realtime/banc/` ; configuration : `config/banc/` (`candidats.json`, `scenarios.json`, `tarifs.json`).
+
+```bash
+# À blanc (défaut) : étages simulés ou locaux seulement, réseau coupé hors boucle locale,
+# candidats payants chiffrés sans être joués
+voice-realtime banc -o /tmp/banc
+# Passage réel : budget validé par Stéphane, prix connus, jamais entre 22:00 et 07:00
+voice-realtime banc --payant --budget-usd 2 --seulement gemini-live -o /tmp/banc-reel
+```
+
+- Étages simulés `simule:rapide | lent | degrade` : ils éprouvent le harnais et ne prédisent aucun fournisseur.
+- Un prix `null` dans `tarifs.json` vaut « inconnu » : le coût n'est pas inventé et le passage payant est refusé.
+- Aucun candidat n'est un choix par défaut ; le choix se fera sur un passage réel (N5).
+
 ## Flags `talk`
 
 | Flag | Effet |

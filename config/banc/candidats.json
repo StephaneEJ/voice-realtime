@@ -1,0 +1,19 @@
+{
+  "commentaire": "Candidats du banc N3. Les simulés éprouvent le harnais et ne prédisent aucun fournisseur. Les payants ne sont joués qu'avec --payant et un budget validé par Stéphane, jamais la nuit. Aucun n'est un choix par défaut.",
+  "candidats": [
+    {"id": "simule-rapide", "genre": "chaine", "stt": "simule:rapide", "llm": "simule:rapide", "tts": "simule:rapide",
+     "description": "Étages simulés rapides (prix fictifs)."},
+    {"id": "simule-lent", "genre": "chaine", "stt": "simule:lent", "llm": "simule:lent", "tts": "simule:lent",
+     "description": "Étages simulés lents (prix fictifs)."},
+    {"id": "simule-degrade", "genre": "chaine", "stt": "simule:degrade", "llm": "simule:degrade", "tts": "simule:degrade",
+     "description": "Transcription abîmée et réponses en anglais injectées : vérifie que les métriques les voient."},
+    {"id": "local-say", "genre": "chaine", "stt": "simule:rapide", "llm": "simule:rapide", "tts": "say:Thomas", "requiert": ["say"],
+     "description": "Synthèse réelle locale et gratuite (macOS say), reconnaissance et modèle simulés."},
+    {"id": "gemini-live", "genre": "temps_reel", "fournisseur": "gemini", "modele": "gemini-2.5-flash-native-audio-latest",
+     "description": "Gemini Live, audio natif (payant)."},
+    {"id": "openai-realtime-mini", "genre": "temps_reel", "fournisseur": "openai", "modele": "gpt-realtime-mini",
+     "description": "OpenAI Realtime mini (payant)."},
+    {"id": "chaine-api", "genre": "chaine", "stt": "openai:gpt-4o-mini-transcribe", "llm": "anthropic:claude-haiku-5-5", "tts": "openai:gpt-4o-mini-tts:alloy",
+     "description": "Chaîne sur API (payant) : modèles à confirmer par Stéphane avant le passage réel."}
+  ]
+}
