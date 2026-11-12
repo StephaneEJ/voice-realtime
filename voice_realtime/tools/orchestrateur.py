@@ -384,9 +384,12 @@ def specs_orchestrateur(
             name="send_instruction",
             description=(
                 "Envoie une consigne d'une ligne, décidée explicitement par Stéphane, à une session de "
-                "la liste blanche. Une consigne sensible renvoie un jeton_confirmation : relire la "
-                "consigne à Stéphane, attendre son accord oral explicite, puis rappeler avec "
-                "confirmation=<jeton>. Ne jamais confirmer à sa place."
+                "la liste blanche. Consigne sensible, motif confirmation_ecran_requise : un code de six "
+                "chiffres s'affiche sur l'écran de Stéphane ; lui relire la consigne, lui demander de "
+                "dicter ce code, puis rappeler avec confirmation=<code dicté>. Tu ne connais pas ce code : "
+                "ne jamais l'inventer. Motif confirmation_requise (repli) : attendre l'accord oral "
+                "explicite de Stéphane, puis rappeler avec confirmation=<jeton_confirmation>. Ne jamais "
+                "confirmer à sa place."
             ),
             safety=ToolSafetyLevel.WRITE_USER_SCOPE,
             parameters_schema=_schema(
@@ -399,7 +402,7 @@ def specs_orchestrateur(
                     },
                     "confirmation": {
                         "type": "string",
-                        "description": "Jeton rendu par le serveur, après accord oral de Stéphane",
+                        "description": "Code dicté par Stéphane depuis son écran, ou jeton du repli après son accord oral",
                     },
                 },
                 ["session_id", "consigne"],
