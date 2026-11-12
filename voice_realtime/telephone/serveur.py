@@ -8,7 +8,8 @@ Un seul port, une seule dépendance (`websockets`, déjà présente) :
 
 Verrous locaux, en plus de l'application Cloudflare Access en bordure :
 
-1. écoute sur la boucle locale par défaut (le tunnel s'y connecte) ;
+1. écoute sur la boucle locale par défaut (le tunnel s'y connecte) ; toute autre
+   adresse d'écoute exige Access ou le jeton local, sinon le serveur refuse de partir ;
 2. en-tête `Host` dans une liste fermée (contre le rattachement DNS : une page
    tierce qui ferait pointer son nom vers 127.0.0.1 est refusée) ;
 3. `Origin` du WebSocket identique à l'hôte servi ou à un nom public déclaré
@@ -29,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hmac
+import ipaddress
 import json
 import mimetypes
 from dataclasses import dataclass, field
@@ -61,6 +63,17 @@ FICHIERS = {
     "/icone.svg": "icone.svg",
 }
 NOMS_LOCAUX = ("localhost", "127.0.0.1", "[::1]")
+
+
+def est_boucle_locale(hote: str) -> bool:
+    """Vrai pour `localhost` et les adresses de bouclage ; `0.0.0.0`, `::` et tout nom sont exclus."""
+    nom = (hote or "").strip().strip("[]").lower()
+    if nom == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(nom).is_loopback
+    except ValueError:
+        return False
 
 
 def _type_mime(nom: str) -> str:
@@ -116,6 +129,13 @@ class ServeurTelephone:
     appels: int = field(default=0, init=False)
 
     def __post_init__(self) -> None:
+        if not est_boucle_locale(self.hote) and self.acces is None and not self.jeton:
+            # Hors boucle locale, tout appareil du réseau joindrait le port et forgerait
+            # Host et Origin : il obtiendrait un appel complet (outils et dépense).
+            raise ValueError(
+                f"écoute sur {self.hote} hors boucle locale : verrou local exigé, vérification Access "
+                "(--access-equipe, --access-aud, --access-adresse) ou jeton local (--jeton-fichier)"
+            )
         if self.noms_publics and self.acces is None and not self.jeton:
             raise ValueError(
                 "un nom public exige un verrou local : vérification Access "
