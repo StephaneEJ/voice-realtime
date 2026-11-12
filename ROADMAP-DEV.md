@@ -1,13 +1,13 @@
 # ROADMAP-DEV
 
-## Où j'en suis — 12/11 03:40
+## Où j'en suis — 12/11 01:59
 Résultat : N — voix duplex multi-fournisseurs, cliente de l'orchestrateur vocal, hors apps Claude et ChatGPT
-Lot : 2/6 — N1 client MCP des 5 outils de l'orchestrateur (livré la nuit du 12/11 ; suivant : 3/6 N2)
+Lot : 3/6 — N2 mode chaîne (livré la nuit du 12/11 ; suivant : 4/6 N4)
 Terminé quand : depuis le téléphone, en marchant, Stéphane pilote ses sessions cmux à la voix par ce dépôt ; fournisseur par défaut et repli choisis sur preuves
-Jalons : [x] reprise [x] N1 client MCP [ ] N2 mode chaîne [ ] N4 page téléphone [ ] N3 banc d'essai [ ] N5 essais réels
-Dernier acquis : commit 6c58093 — 5 outils MCP exposés en `ToolSpec`, lectures réelles sur le serveur local ; 261 tests verts sans réseau
-Prochaine action : lot 3/6 N2 — mode chaîne (reconnaissance, modèle, synthèse) derrière `providers`, branche `nuit/B3`
-Bloqué : rien ; N3 payant et N5 exigent Stéphane (budget, clés, essais en balade)
+Jalons : [x] reprise [x] N1 client MCP [x] N2 mode chaîne [ ] N4 page téléphone [ ] N3 banc d'essai [ ] N5 essais réels
+Dernier acquis : commit f990dd9 — `--provider chain` (STT → modèle au choix → TTS) derrière `providers`, rejeu `chain-rejouer` ; 303 tests verts sans réseau
+Prochaine action : lot 4/6 N4 — page téléphone WebRTC, code et essai local, branche `nuit/B4`
+Bloqué : rien ; modèle whisper local tronqué (à retélécharger) ; N3 payant et N5 exigent Stéphane
 
 ## Objectif final
 
@@ -39,7 +39,7 @@ Les documents `docs/PHASE_3_ROADMAP.md` et `docs/ROADMAP_V3_MULTI_SESSION.md` so
 |---|---|---|---|
 | 1/6 | B1 | Reprise du dépôt selon le système de développement : `AGENTS.md`, `CLAUDE.md`, cette roadmap, journal, test de format | livré (12/11) |
 | 2/6 | B2 | N1 — client MCP des 5 outils de l'orchestrateur (`list_sessions`, `get_state_summary`, `get_last_response`, `send_instruction`, `get_instruction_status`), jeton local par `headersHelper`, garde-fou côté serveur, exposés au modèle comme `ToolSpec` | livré (12/11) |
-| 3/6 | B3 | N2 — mode chaîne (reconnaissance vocale, modèle API au choix, synthèse vocale) derrière le protocole `providers`, testé sur enregistrements, sans réseau | à_faire |
+| 3/6 | B3 | N2 — mode chaîne (reconnaissance vocale, modèle API au choix, synthèse vocale) derrière le protocole `providers`, testé sur enregistrements, sans réseau | livré (12/11) |
 | 4/6 | B4 | N4 — page téléphone WebRTC : code et essai local ; exposition derrière Cloudflare Access selon l'autorisation 1 du 12/11 | à_faire |
 | 5/6 | B5 | N3 — banc d'essai : harnais, métriques (latence de première réponse, français, coupure, appels d'outils, coût à l'heure) et rapport à blanc, sans appel payant ; passage réel sur budget validé | à_faire |
 | 6/6 | — | N5 — essais réels en balade, choix du fournisseur par défaut et du repli | à_faire, exige Stéphane |
@@ -60,9 +60,11 @@ Les documents `docs/PHASE_3_ROADMAP.md` et `docs/ROADMAP_V3_MULTI_SESSION.md` so
 - 2026-11-12 — Le dépôt adopte le système de développement : `ROADMAP-DEV.md` unique, bloc « Où j'en suis », journal en ajout seul ; les roadmaps de mai deviennent des archives.
 - 2026-11-12 — Les outils de l'orchestrateur sont consommés comme client MCP ; aucune copie du garde-fou ni de la liste blanche.
 - 2026-11-12 — Client MCP minimal écrit avec `httpx` (déjà présent) plutôt que le SDK `mcp` : pas de nouvelle dépendance ni de verrou à recalculer ; transport HTTP streamable (JSON ou SSE, `Mcp-Session-Id`), jeton relu par le `headersHelper` du Cockpit à chaque ouverture de session. `send_instruction` est classé `WRITE_USER_SCOPE` ; la CLI `voice-realtime orchestrateur` n'expose que les lectures.
+- 2026-11-12 — Mode chaîne : VAD locale par énergie (pas de dépendance native), synthèse phrase par phrase, aucun étage par défaut (les trois sont à préciser, en attendant N3). Modèle : Chat Completions compatible OpenAI (couvre OpenAI, Mistral, Groq, OpenRouter, Ollama) et Messages API Anthropic par `httpx`, en flux. Un appel d'outil lancé survit à une coupure de parole : son résultat rejoint l'historique du tour suivant.
 
 ## Risques ouverts
 
 - Les tests vocaux de la phase 2 (matrice 9 dimensions) n'ont jamais été joués : la qualité réelle en français n'est pas mesurée.
 - `pyaec` et `sounddevice` exigent des bibliothèques natives : un poste neuf peut échouer à l'installation.
 - Le banc N3 dépend d'appels payants : sans budget validé, il reste à blanc.
+- Mode chaîne : la VAD par énergie n'est pas éprouvée en rue ni sans casque (l'écho de la synthèse peut couper la réponse ; `--aec` à essayer) ; aucun étage n'a été appelé sur une API réelle.

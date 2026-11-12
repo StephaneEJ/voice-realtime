@@ -1,0 +1,51 @@
+{
+  "deux_phrases.wav": {
+    "source": "say -v Thomas, bruit gaussien 0.004 RMS graine 12",
+    "duree_ms": 6917,
+    "segments": [
+      {
+        "texte": "Liste mes sessions en cours.",
+        "debut_ms": 600,
+        "fin_ms": 2230
+      },
+      {
+        "texte": "Quel est le dernier retour de la session cockpit ?",
+        "debut_ms": 3430,
+        "fin_ms": 5917
+      }
+    ]
+  },
+  "coupure.wav": {
+    "source": "say -v Thomas, bruit gaussien 0.004 RMS graine 12",
+    "duree_ms": 2492,
+    "segments": [
+      {
+        "texte": "Attends, arrête-toi.",
+        "debut_ms": 400,
+        "fin_ms": 1592
+      }
+    ]
+  },
+  "killchat.wav": {
+    "source": "say -v Thomas, bruit gaussien 0.004 RMS graine 12",
+    "duree_ms": 1772,
+    "segments": [
+      {
+        "texte": "Killchat.",
+        "debut_ms": 400,
+        "fin_ms": 872
+      }
+    ]
+  },
+  "jfk.wav": {
+    "source": "whisper.cpp samples/jfk.wav — discours inaugural de J. F. Kennedy (1961), domaine public",
+    "duree_ms": 11000,
+    "segments": [
+      {
+        "texte": "And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country.",
+        "debut_ms": null,
+        "fin_ms": null
+      }
+    ]
+  }
+}

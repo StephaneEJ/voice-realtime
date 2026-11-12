@@ -376,6 +376,55 @@ def orchestrateur(
     typer.echo(_json.dumps(donnees, ensure_ascii=False, indent=2))
 
 
+@app.command(name="chain-rejouer")
+def chain_rejouer(
+    enregistrement: Path = typer.Argument(..., help="WAV PCM16 mono à rejouer comme un micro"),
+    chain_stt: str = typer.Option("", "--chain-stt", envvar="VOICE_REALTIME_CHAIN_STT", help="Spécification de reconnaissance vocale"),
+    chain_llm: str = typer.Option("", "--chain-llm", envvar="VOICE_REALTIME_CHAIN_LLM", help="Spécification du modèle"),
+    chain_tts: str = typer.Option("", "--chain-tts", envvar="VOICE_REALTIME_CHAIN_TTS", help="Spécification de synthèse vocale"),
+    sortie: Path | None = typer.Option(None, "--sortie", "-o", help="WAV où écrire l'audio produit"),
+    vad: str = typer.Option("balanced", "--vad", help="reactive | balanced | patient | very-patient"),
+    temps_reel: bool = typer.Option(False, "--temps-reel", help="Pousser l'audio au rythme réel"),
+    systeme: str = typer.Option("Tu réponds en français, en une ou deux phrases.", "--systeme", help="Consigne système"),
+) -> None:
+    """Mode chaîne : rejoue un enregistrement (reconnaissance → modèle → synthèse), sans micro ni haut-parleur.
+
+    Aucun outil n'est branché. Pour un essai sans aucun réseau :
+    `--chain-stt "script:phrase 1|phrase 2" --chain-llm echo --chain-tts say`.
+    """
+    import json as _json
+    from dataclasses import asdict
+
+    from .providers.chain_audio import pcm16_to_wav, wav_to_pcm16
+    from .providers.chain_replay import replay
+    from .providers.chain_stages import ChainConfigError, build_chain_provider
+
+    try:
+        load_config()  # charge les clés du fichier de secrets dans l'environnement
+    except FileNotFoundError:
+        pass
+    try:
+        impl = build_chain_provider(chain_stt, chain_llm, chain_tts)
+        pcm, rate = wav_to_pcm16(enregistrement.read_bytes())
+    except (ChainConfigError, ValueError, OSError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    res = asyncio.run(replay(impl, pcm, rate, system_prompt=systeme, realtime=temps_reel, vad=vad))
+    for ev in res.events:
+        if ev.kind == "final_transcript_user":
+            typer.echo(f"Utilisateur : {ev.data.get('text', '')}")
+        elif ev.kind == "final_transcript_model":
+            typer.echo(f"Modèle : {ev.data.get('text', '')}")
+        elif ev.kind == "model_interrupted":
+            typer.echo("[coupure de parole]")
+        elif ev.kind == "error":
+            typer.echo(f"Erreur : {ev.data}")
+    if sortie is not None:
+        sortie.write_bytes(pcm16_to_wav(res.audio_out, impl.output_sample_rate))
+        typer.echo(f"Audio produit : {sortie} ({len(res.audio_out) / (2 * impl.output_sample_rate):.1f} s)")
+    typer.echo(_json.dumps([asdict(m) for m in res.metrics], ensure_ascii=False, indent=2))
+
+
 @app.command()
 def serve(
     host: str = typer.Option("127.0.0.1", "--host", help="Host to bind. Default: loopback only."),
@@ -656,7 +705,7 @@ async def _run_preview_voices(
 
 @app.command()
 def talk(
-    provider: str = typer.Option("gemini", "--provider", "-p", help="openai | gemini"),
+    provider: str = typer.Option("gemini", "--provider", "-p", help="openai | gemini | chain"),
     model: str = typer.Option("", "--model", help="Override model id."),
     voice: str = typer.Option("", "--voice", help="Override voice. OpenAI: alloy|ash|ballad|coral|echo|sage|shimmer|verse. Gemini: Aoede|Charon|Fenrir|Kore|Puck."),
     project: str = typer.Option("", "--project", help="Inject project context from vault (partial name match)."),
@@ -753,6 +802,18 @@ def talk(
         "--aec-tail-ms",
         help="AEC filter tail length (ms). Speex MDF default 100 ms covers most living rooms; raise to 200 in echoey spaces.",
     ),
+    chain_stt: str = typer.Option(
+        "", "--chain-stt", envvar="VOICE_REALTIME_CHAIN_STT",
+        help="Mode chaîne : reconnaissance vocale (whisper-cpp[:modele] | openai:<modele>[@url]).",
+    ),
+    chain_llm: str = typer.Option(
+        "", "--chain-llm", envvar="VOICE_REALTIME_CHAIN_LLM",
+        help="Mode chaîne : modèle (openai:<modele>[@url] | anthropic:<modele> | echo).",
+    ),
+    chain_tts: str = typer.Option(
+        "", "--chain-tts", envvar="VOICE_REALTIME_CHAIN_TTS",
+        help="Mode chaîne : synthèse vocale (say[:voix] | openai:<modele>[:voix][@url]).",
+    ),
 ) -> None:
     """M2-M4: duplex audio session with context injection, cost tracking, vault save."""
     try:
@@ -790,6 +851,7 @@ def talk(
             aec = True
         persona_knowledge = build_persona_knowledge_block(persona_obj)
 
+    chain_impl = None
     if provider == "openai":
         if not cfg.has_openai:
             console.print("[red]OPENAI_API_KEY missing[/red]")
@@ -802,6 +864,15 @@ def talk(
             raise typer.Exit(1)
         chosen_model = model or GEMINI_DEFAULT_MODEL
         api_key = cfg.gemini_api_key
+    elif provider == "chain":
+        from .providers.chain_stages import ChainConfigError, build_chain_provider
+        try:
+            chain_impl = build_chain_provider(chain_stt, chain_llm, chain_tts)
+        except ChainConfigError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1)
+        chosen_model = chain_impl.label
+        api_key = ""
     else:
         console.print(f"[red]Unknown provider: {provider}[/red]")
         raise typer.Exit(1)
@@ -893,6 +964,7 @@ def talk(
             aec_enabled=aec,
             aec_delay_ms=aec_delay_ms,
             aec_tail_ms=aec_tail_ms,
+            chain_impl=chain_impl,
         )
     )
 
@@ -928,6 +1000,7 @@ async def _run_talk(
     aec_enabled: bool = False,
     aec_delay_ms: int = 60,
     aec_tail_ms: int = 100,
+    chain_impl=None,
 ) -> None:
     # Lazy import audio to avoid PortAudio errors at module load
     from .audio.microphone import MicrophoneStream
@@ -957,6 +1030,11 @@ async def _run_talk(
         input_rate = mic_rate_override or OPENAI_AUDIO_SAMPLE_RATE
         output_rate = OPENAI_AUDIO_SAMPLE_RATE
         impl = OpenAIRealtimeProvider()
+    elif provider_name == "chain" and chain_impl is not None:
+        # Mode chaîne : VAD locale à 16 kHz (whisper), sortie au rythme de la synthèse.
+        input_rate = mic_rate_override or 16000
+        output_rate = chain_impl.output_sample_rate
+        impl = chain_impl
     else:
         input_rate = mic_rate_override or GEMINI_INPUT_SAMPLE_RATE
         output_rate = GEMINI_OUTPUT_SAMPLE_RATE
