@@ -33,6 +33,8 @@ from typing import Any, AsyncIterator, Mapping
 
 import httpx
 
+from ..url_sure import UrlNonSure, verifier_url
+
 from .base import ToolSpec
 from .chain import ChainProvider, ChainStageError, ModelChunk, ToolCall
 from .chain_audio import pcm16_to_wav, resample_pcm16, wav_to_pcm16
@@ -512,6 +514,11 @@ def parse_spec(spec: str) -> StageSpec:
     if "@" in spec:
         spec, base_url = spec.split("@", 1)
         base_url = base_url.strip() or None
+    if base_url is not None:
+        try:
+            verifier_url(base_url, "étage de la chaîne")  # N12 : clé d'API jamais en clair
+        except UrlNonSure as exc:
+            raise ChainConfigError(str(exc)) from None
     if spec.startswith("script:"):
         return StageSpec("script", (spec[len("script:"):],), base_url)
     parts = spec.split(":")
