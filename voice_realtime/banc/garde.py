@@ -19,7 +19,6 @@ Trois verrous indépendants :
 from __future__ import annotations
 
 import contextlib
-import ipaddress
 import socket
 from dataclasses import dataclass
 from datetime import datetime
@@ -28,6 +27,7 @@ from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 from ..providers.chain_stages import parse_spec
+from ..url_sure import hote_local
 
 PARIS = ZoneInfo("Europe/Paris")
 NUIT_DEBUT_H = 22
@@ -49,15 +49,7 @@ class PassageRefuse(RuntimeError):
     """Passage du banc refusé par un garde-fou (motif lisible, sans secret)."""
 
 
-def _hote_local(hote: str | None) -> bool:
-    if not hote:
-        return False
-    if hote in {"localhost", "localhost.localdomain"}:
-        return True
-    try:
-        return ipaddress.ip_address(hote.strip("[]")).is_loopback
-    except ValueError:
-        return False
+_hote_local = hote_local  # un seul test d'hôte local pour le banc et les URL de service (N12)
 
 
 def etage_gratuit(etage: str, spec: str) -> bool:

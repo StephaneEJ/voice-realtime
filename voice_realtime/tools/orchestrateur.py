@@ -14,7 +14,8 @@ sur `http://127.0.0.1:8765/mcp` (transport HTTP streamable). Ce module n'en copi
 
 Réglages (variables d'environnement, valeurs par défaut entre parenthèses) :
 
-- `VOICE_REALTIME_ORCHESTRATEUR_URL` (`http://127.0.0.1:8765/mcp`) ;
+- `VOICE_REALTIME_ORCHESTRATEUR_URL` (`http://127.0.0.1:8765/mcp`) ; `https://`, ou `http://` en
+  boucle locale seulement (N12 : le jeton ne part jamais en clair) ;
 - `VOICE_REALTIME_ORCHESTRATEUR_HEADERS_HELPER` (script `entete-jeton.sh` du Cockpit) ;
 - `VOICE_REALTIME_ORCHESTRATEUR_TIMEOUT` (`30` secondes).
 """
@@ -31,6 +32,7 @@ from typing import Any, Callable
 
 import httpx
 
+from ..url_sure import UrlNonSure, verifier_url
 from .registry import ToolResult, ToolSafetyLevel, ToolSpec
 
 URL_PAR_DEFAUT = "http://127.0.0.1:8765/mcp"
@@ -171,6 +173,10 @@ class ClientOrchestrateur:
         return entetes
 
     def _poster(self, message: dict[str, Any]) -> httpx.Response:
+        try:
+            verifier_url(self.url, "orchestrateur")  # N12 : le jeton ne part jamais en clair
+        except UrlNonSure as exc:
+            raise ErreurOrchestrateurClient(str(exc)) from None
         try:
             reponse = self._client_http().post(self.url, json=message, headers=self._entetes())
         except httpx.HTTPError as exc:
